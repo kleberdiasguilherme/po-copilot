@@ -1,0 +1,8 @@
+# core.autocrlf=true converteria o Makefile para CRLF, e make quebra nas
+# continuacoes de linha. Estes arquivos ficam em LF em qualquer plataforma.
+* text=auto
+Makefile text eol=lf
+*.sh     text eol=lf
+
+# dev.ps1 fica em CRLF, que e o nativo do PowerShell no Windows.
+*.ps1    text eol=crlf
