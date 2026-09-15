@@ -99,7 +99,7 @@ First time, install both apps:
 cd apps/api
 python -m venv .venv
 source .venv/Scripts/activate    # Git Bash / Windows; elsewhere: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt    # runtime + ruff e pytest
 cp .env.example .env             # add ANTHROPIC_API_KEY (and DATABASE_URL from M2 on)
 
 # Frontend

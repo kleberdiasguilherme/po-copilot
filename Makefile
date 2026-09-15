@@ -46,7 +46,7 @@ install:
 	python -m venv apps/api/.venv
 	py=apps/api/.venv/bin/python; \
 	[ -x "$$py" ] || py=apps/api/.venv/Scripts/python.exe; \
-	"$$py" -m pip install -r apps/api/requirements.txt
+	"$$py" -m pip install -r apps/api/requirements-dev.txt
 	cd apps/web && npm install
 
 ## test — roda os testes da API.
