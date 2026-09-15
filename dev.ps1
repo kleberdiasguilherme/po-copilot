@@ -43,7 +43,7 @@ if (-not (Test-Path $venvPython)) {
     Write-Host '  Rode uma vez, a partir da raiz do repo:'
     Write-Host ''
     Write-Host '    python -m venv apps/api/.venv'
-    Write-Host '    apps/api/.venv/Scripts/python.exe -m pip install -r apps/api/requirements.txt'
+    Write-Host '    apps/api/.venv/Scripts/python.exe -m pip install -r apps/api/requirements-dev.txt'
     Write-Host ''
     exit 1
 }
