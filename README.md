@@ -52,7 +52,7 @@ A distilled BERT model classifies feedback into bug / feature request / praise /
 
 | Layer | Tech | Why |
 |---|---|---|
-| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind | Fast to ship, familiar from prior work |
+| Frontend | Next.js 16 (App Router) + TypeScript + Tailwind | Fast to ship, familiar from prior work |
 | Backend | Python 3.13 + FastAPI + Pydantic | The retrieval and fine-tuning ecosystem is native to Python |
 | LLM | Claude 3.5 Sonnet via Anthropic API | Daily working familiarity, and prompt caching to keep the project inside a US$100/month budget |
 | RAG | LangChain + pgvector (on Neon) | Low cost and full control over chunking, indexing, and retrieval |
