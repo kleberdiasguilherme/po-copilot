@@ -105,6 +105,7 @@ cp .env.example .env             # add ANTHROPIC_API_KEY (and DATABASE_URL from 
 # Frontend
 cd ../web
 npm install
+cp .env.local.example .env.local # points at the API on :8000
 ```
 
 Then, from the repository root, one command starts both:
@@ -114,7 +115,7 @@ Then, from the repository root, one command starts both:
 make dev         # Git Bash with make, WSL, macOS, Linux
 ```
 
-Backend on `:8000`, frontend on `:3000`. `GET /health` returns `{"status": "ok", "version": "0.1.0"}`.
+Backend on `:8000`, frontend on `:3000`. `GET /health` returns `{"status": "ok", "version": "0.1.0", "environment": "development"}`.
 
 To run each one on its own:
 
@@ -128,6 +129,21 @@ API tests:
 ```bash
 cd apps/api && python -m pytest tests
 ```
+
+## Deployment
+
+Frontend on Vercel, backend on Railway, both redeploying on every push to `main`.
+The first deploy has an ordering trap — each service needs the other's URL — so it
+is written up step by step in [`docs/deploy.md`](docs/deploy.md).
+
+Environment variables, none of which are committed:
+
+| Service | Variable | Purpose |
+|---|---|---|
+| Railway | `ENVIRONMENT` | `production`; echoed back by `/health` |
+| Railway | `CORS_ORIGINS` | comma-separated origins allowed to call the API |
+| Railway | `ANTHROPIC_API_KEY` | empty until M1 |
+| Vercel | `NEXT_PUBLIC_API_URL` | API base URL, inlined at build time |
 
 ## Non-goals
 

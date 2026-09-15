@@ -1,3 +1,5 @@
+import { ApiStatus } from "./api-status";
+
 const GITHUB_URL = "https://github.com/kleberdiasguilherme/po-copilot";
 const LINKEDIN_URL = "https://www.linkedin.com/in/kleberdiasguilherme/";
 
@@ -129,15 +131,19 @@ export default function Home() {
             </a>
             . MIT licensed.
           </p>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 hover:text-black dark:hover:text-white"
-          >
-            <GitHubIcon />
-            kleberdiasguilherme/po-copilot
-          </a>
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+            <ApiStatus />
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 hover:text-black dark:hover:text-white"
+            >
+              <GitHubIcon />
+              kleberdiasguilherme/po-copilot
+            </a>
+          </div>
         </div>
       </footer>
     </div>
