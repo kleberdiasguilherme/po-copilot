@@ -92,25 +92,42 @@ Architecture decisions are documented in `docs/adr/`:
 
 ## Running locally
 
-> Not yet functional — the scaffold lands in M0. These are the intended commands.
+First time, install both apps:
 
 ```bash
-# Backend
+# Backend — Python 3.13
 cd apps/api
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+source .venv/Scripts/activate    # Git Bash / Windows; elsewhere: source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env             # add ANTHROPIC_API_KEY (and DATABASE_URL from M2 on)
-fastapi dev app/main.py
 
 # Frontend
-cd apps/web
+cd ../web
 npm install
-cp .env.local.example .env.local
-npm run dev
 ```
 
-Backend on `:8000`, frontend on `:3000`.
+Then, from the repository root, one command starts both:
+
+```bash
+./dev.ps1        # Windows PowerShell
+make dev         # Git Bash with make, WSL, macOS, Linux
+```
+
+Backend on `:8000`, frontend on `:3000`. `GET /health` returns `{"status": "ok", "version": "0.1.0"}`.
+
+To run each one on its own:
+
+```bash
+cd apps/api && fastapi dev app/main.py    # :8000
+cd apps/web && npm run dev                # :3000
+```
+
+API tests:
+
+```bash
+cd apps/api && python -m pytest tests
+```
 
 ## Non-goals
 
