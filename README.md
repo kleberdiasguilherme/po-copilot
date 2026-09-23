@@ -4,7 +4,7 @@
 > Built with Claude, LangChain, pgvector, Next.js, and FastAPI.
 
 **Status:** M0 (foundation) complete — the landing page is live; the backend and the three features are not published yet (backend ships in M1).
-**Live demo:** https://po-copilot-lilac.vercel.app
+**Live demo:** https://po-copilot-kleberdias.vercel.app
 **Author:** Kleber Dias Guilherme — [LinkedIn](https://www.linkedin.com/in/kleberdiasguilherme/)
 
 ---
