@@ -25,22 +25,25 @@ const DOTS: Record<Status, string> = {
  * Roda no browser de proposito: uma chamada do servidor do Next nao provaria
  * que o CORS entre a Vercel e a Railway esta configurado, que e justamente o
  * que costuma quebrar no primeiro deploy.
+ *
+ * Sem NEXT_PUBLIC_API_URL nao renderiza nada: enquanto o backend nao esta
+ * publicado (adiado para o M1), um selo vermelho permanente na landing page
+ * seria pior que nenhum selo.
  */
 export function ApiStatus() {
-  // Sem a variavel nao ha o que checar: ja nasce no estado final, em vez de
-  // um setState sincrono dentro do efeito.
-  const [status, setStatus] = useState<Status>(
-    API_URL ? "checking" : "unreachable",
-  );
+  if (!API_URL) return null;
+  return <ApiStatusBadge apiUrl={API_URL} />;
+}
+
+function ApiStatusBadge({ apiUrl }: { apiUrl: string }) {
+  const [status, setStatus] = useState<Status>("checking");
 
   useEffect(() => {
-    if (!API_URL) return;
-
     let cancelled = false;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    fetch(`${API_URL}/health`, { signal: controller.signal })
+    fetch(`${apiUrl}/health`, { signal: controller.signal })
       .then((response) => {
         if (!cancelled) setStatus(response.ok ? "online" : "unreachable");
       })
@@ -54,13 +57,13 @@ export function ApiStatus() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, []);
+  }, [apiUrl]);
 
   return (
     <span
       className="inline-flex items-center gap-2"
       aria-live="polite"
-      title={API_URL ? `GET ${API_URL}/health` : "NEXT_PUBLIC_API_URL is not set"}
+      title={`GET ${apiUrl}/health`}
     >
       <span
         aria-hidden="true"
