@@ -1,8 +1,38 @@
-# Deploy — Vercel (frontend) + Railway (backend)
+# Deploy
 
-Runbook do primeiro deploy. Depois dele, os dois serviços redeployam sozinhos a cada push em `main`.
+| Parte | Onde | Status |
+|---|---|---|
+| Frontend (`apps/web`) | Vercel Hobby (US$0) | **No ar desde o M0** |
+| Backend (`apps/api`) | Railway ou Vercel Python Functions | **Adiado para o M1** — issue US-009 |
 
-## A ordem importa
+## Hoje — M0: só o frontend
+
+O backend não foi publicado no M0 por decisão consciente: hoje ele serve apenas `/health`, que nenhum visitante abre, e não vale pagar hospedagem para isso. Ele sobe no M1, quando o User Story Generator existir. A escolha entre Railway (~US$1–5/mês) e Python Functions na própria Vercel (grátis, mas muda o que o ADR-000 registrou) é parte da US-009.
+
+Importe o repositório `kleberdiasguilherme/po-copilot` na Vercel:
+
+| Configuração | Valor |
+|---|---|
+| Framework Preset | Next.js (detectado) |
+| Root Directory | `apps/web` — o passo que todo mundo erra em monorepo |
+| Variáveis de ambiente | **nenhuma** |
+
+Sem `NEXT_PUBLIC_API_URL`, o `ApiStatus` não renderiza nada: o rodapé fica sem selo, em vez de mostrar *API unreachable* para sempre. A cada push em `main` a Vercel redeploya sozinha.
+
+Verificação:
+
+- [ ] A URL pública devolve 200 (`curl -sI <url>`)
+- [ ] A landing page carrega com hero, os 3 feature cards e os links
+- [ ] O rodapé **não** mostra selo de status da API
+
+## Depois — M1: backend (runbook preservado)
+
+> Nada abaixo está em uso hoje. É o runbook para quando a US-009 for executada, supondo Railway. Se a decisão for Vercel Python Functions, esta seção muda. Com o frontend já publicado, o passo 2 vira só "adicionar `NEXT_PUBLIC_API_URL` na Vercel e redeployar".
+
+Depois do primeiro deploy, os dois serviços redeployam sozinhos a cada push em `main`.
+
+
+### A ordem importa
 
 Cada serviço precisa da URL do outro, e nenhuma das duas existe antes do primeiro deploy. A saída é deployar em três passos, em vez de dois:
 
@@ -12,7 +42,7 @@ Cada serviço precisa da URL do outro, e nenhuma das duas existe antes do primei
 
 Pular o passo 3 é o erro clássico: o site carrega, a API responde ao `curl`, e mesmo assim o indicador no rodapé fica em *API unreachable* — porque o browser bloqueia a resposta antes de o JavaScript vê-la.
 
-## 1. Railway — backend
+### 1. Railway — backend
 
 Novo projeto a partir do repositório `kleberdiasguilherme/po-copilot`.
 
@@ -41,7 +71,7 @@ curl https://<sua-api>.up.railway.app/health
 
 Se `environment` vier `development`, a variável não chegou ao processo.
 
-## 2. Vercel — frontend
+### 2. Vercel — frontend
 
 Importe o mesmo repositório.
 
@@ -58,7 +88,7 @@ Variável de ambiente:
 
 O prefixo `NEXT_PUBLIC_` faz o Next embutir o valor no bundle **durante o build**. Mudar essa variável depois não tem efeito nenhum até um novo build — não basta reiniciar.
 
-## 3. Railway de novo — liberar o CORS
+### 3. Railway de novo — liberar o CORS
 
 Troque `CORS_ORIGINS` pela URL da Vercel e redeploye. Aceita mais de uma origem, separadas por vírgula:
 
@@ -70,7 +100,7 @@ Manter `localhost:3000` na lista permite apontar o front local para a API de pro
 
 Os domínios de preview da Vercel (`po-copilot-<hash>.vercel.app`) mudam a cada PR e **não** estarão nessa lista — nos previews o indicador vai mostrar *API unreachable*. É esperado.
 
-## Verificação final
+### Verificação final
 
 - [ ] `curl https://<api>/health` devolve 200 com `"environment":"production"`
 - [ ] A landing page carrega na URL da Vercel
