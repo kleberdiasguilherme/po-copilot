@@ -3,8 +3,8 @@
 > RAG-powered assistant for Product Owners and Product Managers.
 > Built with Claude, LangChain, pgvector, Next.js, and FastAPI.
 
-**Status:** in active development — M0 (foundation) started 2026-09-14. Nothing is live yet.
-**Live demo:** coming soon
+**Status:** M0 (foundation) complete — the landing page is live; the backend and the three features are not published yet (backend ships in M1).
+**Live demo:** https://po-copilot-kleberdias.vercel.app
 **Author:** Kleber Dias Guilherme — [LinkedIn](https://www.linkedin.com/in/kleberdiasguilherme/)
 
 ---
@@ -57,7 +57,7 @@ A distilled BERT model classifies feedback into bug / feature request / praise /
 | LLM | Claude 3.5 Sonnet via Anthropic API | Daily working familiarity, and prompt caching to keep the project inside a US$100/month budget |
 | RAG | LangChain + pgvector (on Neon) | Low cost and full control over chunking, indexing, and retrieval |
 | Storage | PostgreSQL | Vectors and application data in one system to reason about |
-| Deploy | Vercel (front) + Railway (back) | Vercel Hobby is free; Railway runs on a small paid plan (~US$1–5/month) |
+| Deploy | Vercel (front, live) + backend host chosen in M1 | Vercel Hobby is free; the backend is not published until it has a feature — Railway (~US$1–5/month) vs. Vercel Python Functions is decided in M1 |
 | Observability | PostHog (product) + Sentry (errors) + custom Anthropic cost dashboard | LLMOps discipline |
 | Fine-tuning (M4) | Hugging Face + Google Colab + DistilBERT | Cost-effective for a classification task |
 
@@ -132,18 +132,19 @@ cd apps/api && python -m pytest tests
 
 ## Deployment
 
-Frontend on Vercel, backend on Railway, both redeploying on every push to `main`.
-The first deploy has an ordering trap — each service needs the other's URL — so it
-is written up step by step in [`docs/deploy.md`](docs/deploy.md).
+Today only the frontend is published: Vercel, root directory `apps/web`, no environment
+variables, redeploying on every push to `main`. The backend ships in M1, once it serves
+more than `/health`; its runbook (including the ordering trap between the two services)
+is kept in [`docs/deploy.md`](docs/deploy.md).
 
-Environment variables, none of which are committed:
+Environment variables for when the backend is published — none are set today, and none are committed:
 
 | Service | Variable | Purpose |
 |---|---|---|
 | Railway | `ENVIRONMENT` | `production`; echoed back by `/health` |
 | Railway | `CORS_ORIGINS` | comma-separated origins allowed to call the API |
 | Railway | `ANTHROPIC_API_KEY` | empty until M1 |
-| Vercel | `NEXT_PUBLIC_API_URL` | API base URL, inlined at build time |
+| Vercel | `NEXT_PUBLIC_API_URL` | API base URL, inlined at build time; while unset, the footer API badge is hidden |
 
 ## Non-goals
 
