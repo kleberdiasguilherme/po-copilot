@@ -1,4 +1,5 @@
 import { ApiStatus } from "./api-status";
+import { HERO_TEXT } from "./hero";
 
 const GITHUB_URL = "https://github.com/kleberdiasguilherme/po-copilot";
 const LINKEDIN_URL = "https://www.linkedin.com/in/kleberdiasguilherme/";
@@ -59,10 +60,7 @@ export default function Home() {
           </h1>
 
           <p className="mt-6 max-w-2xl text-lg leading-relaxed text-black/70 text-pretty sm:text-xl dark:text-white/70">
-            A retrieval-augmented assistant for Product Owners and Product
-            Managers. It takes the three loops that slow discovery down —
-            writing stories, synthesizing feedback, prioritizing a backlog — and
-            makes them repeatable.
+            {HERO_TEXT}
           </p>
 
           <div className="mt-10 flex flex-wrap items-center gap-3">
