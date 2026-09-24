@@ -13,6 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Explicito para o og:image sempre sair no dominio estavel: sem isto, a
+  // Vercel pode preencher a URL do deployment (com hash), e o LinkedIn guarda
+  // em cache o preview do primeiro compartilhamento.
+  metadataBase: new URL("https://po-copilot-kleberdias.vercel.app"),
   title: "PO Copilot — a RAG assistant for Product Owners",
   description:
     "Turns raw product signals into the artifacts you ship: user stories in Gherkin, synthesized feedback, and a prioritized backlog.",
