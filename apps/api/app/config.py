@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = ""
+
+    # Modelo usado em todas as chamadas. Trocar de modelo e decisao registrada
+    # (ADR-004), nao detalhe de implementacao: mude aqui, junto com um ADR.
+    anthropic_model: str = "claude-sonnet-5"
+
     environment: str = "development"
 
     # Origens liberadas no CORS, separadas por virgula. Em producao recebe a

@@ -1,0 +1,34 @@
+{
+  "title": "Export filtered report as CSV",
+  "as_a": "sales manager",
+  "i_want": "to export the filtered sales report as a CSV file",
+  "so_that": "I can share the numbers with finance without rebuilding them in a spreadsheet",
+  "acceptance_criteria": [
+    {
+      "scenario": "Export the current filtered view",
+      "given": ["I am on the sales report", "I have filtered it to Q3"],
+      "when": ["I click Export CSV"],
+      "then": ["a CSV file downloads", "it contains only the Q3 rows"]
+    },
+    {
+      "scenario": "Export with no matching rows",
+      "given": ["my filters match no rows"],
+      "when": ["I click Export CSV"],
+      "then": ["a CSV with only the header row downloads"]
+    },
+    {
+      "scenario": "Export fails on the server",
+      "given": ["the export service is unavailable"],
+      "when": ["I click Export CSV"],
+      "then": ["I see an error message", "no file downloads"]
+    }
+  ],
+  "definition_of_done": [
+    "Unit tests cover the CSV serialization",
+    "Export event tracked in analytics"
+  ],
+  "edge_cases": [
+    "Reports above 100k rows: confirm whether to stream or cap",
+    "Values containing commas or line breaks"
+  ]
+}
