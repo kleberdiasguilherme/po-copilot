@@ -1,5 +1,6 @@
 # Runtime da API — e so isto que a Railway instala em producao.
 # Ferramentas de desenvolvimento ficam em requirements-dev.txt.
+anthropic==1.8.0
 fastapi[standard]==0.141.1
 pydantic-settings==2.15.0
 python-dotenv==1.2.3

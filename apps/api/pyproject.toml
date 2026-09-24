@@ -7,3 +7,9 @@ exclude = [".venv"]
 # E/F = pycodestyle + pyflakes (padrao), I = ordenacao de imports,
 # UP = sintaxe moderna, B = bugbear.
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+# O teste live chama a API de verdade e gasta credito: fica fora por padrao.
+# Para roda-lo: pytest -m live
+markers = ["live: chama a API da Anthropic de verdade (pytest -m live)"]
+addopts = "-m 'not live'"
