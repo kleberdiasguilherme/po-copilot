@@ -10,7 +10,8 @@ type Feature = {
   milestone: string;
   title: string;
   description: string;
-  // Presente so nas features ja entregues: vira o selo "Live" e o link.
+  // Presente so nas features ja construidas: vira o selo e o link. O selo diz
+  // "runs locally" ate a US-034 publicar o backend; ai passa a "Live".
   href?: string;
 };
 
@@ -117,7 +118,7 @@ export default function Home() {
                       aria-hidden="true"
                       className="h-1.5 w-1.5 rounded-full bg-emerald-500"
                     />
-                    Live
+                    Built — runs locally
                   </span>
                 ) : (
                   <span className="font-mono text-xs text-black/45 dark:text-white/45">
