@@ -113,10 +113,10 @@ export default function Home() {
                 className="flex flex-col rounded-xl border border-black/10 p-6 transition-colors hover:border-black/25 dark:border-white/15 dark:hover:border-white/30"
               >
                 {feature.href ? (
-                  <span className="inline-flex items-center gap-2 font-mono text-xs text-emerald-700 dark:text-emerald-400">
+                  <span className="inline-flex items-center gap-2 font-mono text-xs text-black/60 dark:text-white/60">
                     <span
                       aria-hidden="true"
-                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                      className="h-1.5 w-1.5 rounded-full bg-amber-500"
                     />
                     Built — runs locally
                   </span>
