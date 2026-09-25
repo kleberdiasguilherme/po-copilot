@@ -1,6 +1,6 @@
 """User Story Generator: prompt versionado, schema e parse da resposta.
 
-O endpoint vem em outro PR; este modulo e a parte que ele vai chamar.
+O endpoint POST /api/user-story (app/main.py) e quem chama este modulo.
 """
 
 import logging

@@ -1,13 +1,24 @@
+import Link from "next/link";
+
 import { ApiStatus } from "./api-status";
 import { HERO_TEXT } from "./hero";
 
 const GITHUB_URL = "https://github.com/kleberdiasguilherme/po-copilot";
 const LINKEDIN_URL = "https://www.linkedin.com/in/kleberdiasguilherme/";
 
-const features = [
+type Feature = {
+  milestone: string;
+  title: string;
+  description: string;
+  // Presente so nas features ja entregues: vira o selo "Live" e o link.
+  href?: string;
+};
+
+const features: Feature[] = [
   {
     milestone: "M1",
     title: "User Story Generator",
+    href: "/user-story",
     description:
       "Give it a problem statement. It returns a user story with acceptance criteria in Gherkin, a definition of done, and the edge cases you had not thought to ask about.",
   },
@@ -100,15 +111,33 @@ export default function Home() {
                 key={feature.title}
                 className="flex flex-col rounded-xl border border-black/10 p-6 transition-colors hover:border-black/25 dark:border-white/15 dark:hover:border-white/30"
               >
-                <span className="font-mono text-xs text-black/45 dark:text-white/45">
-                  Planned — {feature.milestone}
-                </span>
+                {feature.href ? (
+                  <span className="inline-flex items-center gap-2 font-mono text-xs text-emerald-700 dark:text-emerald-400">
+                    <span
+                      aria-hidden="true"
+                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                    />
+                    Live
+                  </span>
+                ) : (
+                  <span className="font-mono text-xs text-black/45 dark:text-white/45">
+                    Planned — {feature.milestone}
+                  </span>
+                )}
                 <h3 className="mt-3 text-lg font-semibold tracking-tight">
                   {feature.title}
                 </h3>
                 <p className="mt-3 text-sm leading-relaxed text-black/65 text-pretty dark:text-white/65">
                   {feature.description}
                 </p>
+                {feature.href && (
+                  <Link
+                    href={feature.href}
+                    className="mt-5 inline-flex items-center gap-1 self-start text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black dark:focus-visible:outline-white"
+                  >
+                    Try it <span aria-hidden="true">→</span>
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
