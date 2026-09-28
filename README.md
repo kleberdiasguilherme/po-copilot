@@ -89,6 +89,8 @@ Architecture decisions are documented in `docs/adr/`:
 - **ADR-001** — pgvector vs. Pinecone for retrieval *(planned, M2)*
 - **ADR-002** — LLMOps: observability, guardrails, cost control *(planned, M3)*
 - **ADR-003** — Fine-tuned classifier vs. LLM classification *(planned, M4)*
+- **ADR-004** — Update the model identifier to Claude Sonnet 5 *(written)*
+- **ADR-005** — Structured outputs to guarantee the model's output shape *(written)*
 
 ## Running locally
 

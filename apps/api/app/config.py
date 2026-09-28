@@ -25,6 +25,11 @@ class Settings(BaseSettings):
 
     environment: str = "development"
 
+    # Geracoes de user story por IP dentro da janela. Cada uma custa credito:
+    # o limite existe para um visitante nao esgotar o saldo (veja rate_limit.py).
+    rate_limit_requests: int = 10
+    rate_limit_window_seconds: int = 3600
+
     # Origens liberadas no CORS, separadas por virgula. Em producao recebe a
     # URL da Vercel. E uma string, e nao uma lista, porque o painel da Railway
     # so aceita texto — uma lista JSON teria de ser digitada com aspas.
