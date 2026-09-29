@@ -5,6 +5,7 @@ de ponta a ponta: ordem dos eventos, erro no meio do stream e rate limit.
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ def completion(text: str, stop_reason: str = "end_turn") -> Completion:
         output_tokens=433,
         latency_ms=5210,
         stop_reason=stop_reason,
+        first_token_ms=1240,
     )
 
 
@@ -141,6 +143,15 @@ def test_stream_ends_with_the_validated_story_after_the_partials() -> None:
     # O ultimo parcial ja e o objeto inteiro: o done nao traz surpresa.
     assert partials[-1].data == json.loads(fixture_text())
     assert last.generation.completion.output_tokens == 433
+
+
+def test_stream_logs_the_first_token_time(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="app.user_story"):
+        list(stream_user_story(DESCRIPTION, provider_streaming(streamed(fixture_text()))))
+
+    line = next(r.getMessage() for r in caplog.records if r.name == "app.user_story")
+    for field in ("first_token_ms=1240", "latency_ms=5210", "stream=True"):
+        assert field in line
 
 
 def test_stream_sends_at_most_one_snapshot_per_interval() -> None:

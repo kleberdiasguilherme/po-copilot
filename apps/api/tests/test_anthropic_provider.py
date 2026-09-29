@@ -1,5 +1,7 @@
 """Testes do provider com o cliente do SDK falso: confere o que vai e o que volta."""
 
+import time
+from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -112,3 +114,35 @@ def test_closing_the_stream_early_closes_the_api_connection() -> None:
     items.close()
 
     client.messages.stream.return_value.__exit__.assert_called_once()
+
+
+def test_complete_has_no_first_token_time() -> None:
+    result = AnthropicProvider(client=fake_client()).complete(
+        "system", [{"role": "user", "content": "hi"}]
+    )
+
+    assert result.first_token_ms is None
+
+
+def test_stream_measures_first_token_when_it_arrives_not_after_it_is_consumed() -> None:
+    def slow_start() -> Iterator[str]:
+        time.sleep(0.05)  # a API demora para mandar o primeiro trecho
+        yield "{"
+        yield "}"
+
+    client = fake_streaming_client(["{", "}"])
+    client.messages.stream.return_value.__enter__.return_value.text_stream = slow_start()
+
+    completion = None
+    for item in AnthropicProvider(client=client).stream(
+        "system", [{"role": "user", "content": "hi"}]
+    ):
+        if isinstance(item, Completion):
+            completion = item
+        else:
+            time.sleep(0.2)  # quem consome demora com cada trecho
+
+    assert completion is not None
+    assert completion.first_token_ms is not None
+    assert 50 <= completion.first_token_ms < 200, "o tempo de consumo nao entra"
+    assert completion.latency_ms >= completion.first_token_ms

@@ -35,6 +35,10 @@ class Completion:
     output_tokens: int
     latency_ms: int
     stop_reason: str | None
+    # Do inicio da chamada ate o primeiro trecho de texto do modelo: conexao com
+    # a API mais o tempo ate o primeiro token. So existe com streaming; sem ele
+    # a resposta chega inteira, e o unico tempo e `latency_ms`.
+    first_token_ms: int | None = None
 
 
 class AnthropicProvider:
@@ -81,12 +85,18 @@ class AnthropicProvider:
         a API, e o modelo para de gerar tokens que ninguem vai ler.
         """
         started = time.perf_counter()
+        first_token_at: float | None = None
         with self._client.messages.stream(
             **self._params(system, messages, output_schema, max_tokens)
         ) as stream:
-            yield from stream.text_stream
+            for text in stream.text_stream:
+                # Medido quando o trecho chega, antes de entrega-lo: o tempo que
+                # quem consome leva com ele nao entra na conta.
+                if first_token_at is None:
+                    first_token_at = time.perf_counter()
+                yield text
             response = stream.get_final_message()
-        yield _completion(response, started)
+        yield _completion(response, started, first_token_at)
 
     def _params(
         self,
@@ -106,7 +116,7 @@ class AnthropicProvider:
         return params
 
 
-def _completion(response: Any, started: float) -> Completion:
+def _completion(response: Any, started: float, first_token_at: float | None = None) -> Completion:
     """Monta o Completion a partir da mensagem final, com ou sem streaming."""
     return Completion(
         text="".join(block.text for block in response.content if block.type == "text"),
@@ -115,4 +125,7 @@ def _completion(response: Any, started: float) -> Completion:
         output_tokens=response.usage.output_tokens,
         latency_ms=round((time.perf_counter() - started) * 1000),
         stop_reason=response.stop_reason,
+        first_token_ms=(
+            None if first_token_at is None else round((first_token_at - started) * 1000)
+        ),
     )
