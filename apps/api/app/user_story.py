@@ -191,12 +191,13 @@ def _finish(completion: Completion, prompt: Prompt, *, streamed: bool) -> UserSt
     """Loga os metadados e valida a resposta — igual com e sem streaming."""
     logger.info(
         "user_story generated prompt=%s model=%s input_tokens=%d output_tokens=%d "
-        "latency_ms=%d stream=%s",
+        "latency_ms=%d first_token_ms=%s stream=%s",
         prompt.version,
         completion.model,
         completion.input_tokens,
         completion.output_tokens,
         completion.latency_ms,
+        completion.first_token_ms,
         streamed,
     )
 
