@@ -1,14 +1,19 @@
 """User Story Generator: prompt versionado, schema e parse da resposta.
 
-O endpoint POST /api/user-story (app/main.py) e quem chama este modulo.
+Os endpoints POST /api/user-story e /api/user-story/stream (app/main.py) sao
+quem chama este modulo.
 """
 
 import logging
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from anthropic import transform_schema
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic_core import from_json
 
 from app.providers.anthropic_provider import AnthropicProvider, Completion
 
@@ -87,6 +92,40 @@ def parse_user_story(text: str) -> UserStory:
         raise InvalidUserStoryError(str(exc)) from exc
 
 
+# Intervalo minimo entre dois snapshots parciais no streaming. Um snapshot por
+# trecho de texto seriam centenas de mensagens com o objeto inteiro; a cada
+# ~100 ms a tela ainda parece continua (ADR-006).
+SNAPSHOT_INTERVAL_SECONDS = 0.1
+
+
+@dataclass(frozen=True)
+class PartialUserStory:
+    """O objeto ate onde o JSON chegou. Provisorio: ainda nao validado."""
+
+    data: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CompletedUserStory:
+    """Fim do stream: a story validada, que substitui o parcial."""
+
+    generation: UserStoryGeneration
+
+
+def parse_partial_user_story(text: str) -> dict[str, Any] | None:
+    """Le um JSON incompleto e devolve o que ja da para mostrar.
+
+    Strings abertas entram como estao ("trailing-strings"), para o texto crescer
+    na tela em vez de esperar a aspa final. Chaves e valores pela metade ficam de
+    fora. Devolve None quando ainda nao ha objeto nenhum.
+    """
+    try:
+        value = from_json(text, allow_partial="trailing-strings")
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def generate_user_story(
     description: str,
     provider: AnthropicProvider,
@@ -99,13 +138,66 @@ def generate_user_story(
         messages=[{"role": "user", "content": description}],
         output_schema=USER_STORY_SCHEMA,
     )
+    return _finish(completion, prompt, streamed=False)
+
+
+def stream_user_story(
+    description: str,
+    provider: AnthropicProvider,
+    prompt: Prompt | None = None,
+    *,
+    interval: float = SNAPSHOT_INTERVAL_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[PartialUserStory | CompletedUserStory]:
+    """Gera a user story em streaming.
+
+    Produz snapshots parciais no maximo a cada `interval` segundos e termina com
+    a story validada. Se a validacao falhar, levanta InvalidUserStoryError depois
+    do ultimo parcial: quem esta na tela ve tudo o que chegou, e o erro.
+    """
+    prompt = prompt or load_prompt()
+    text = ""
+    sent: dict[str, Any] | None = None
+    last_sent_at = float("-inf")
+
+    for chunk in provider.stream(
+        system=prompt.text,
+        messages=[{"role": "user", "content": description}],
+        output_schema=USER_STORY_SCHEMA,
+    ):
+        if isinstance(chunk, Completion):
+            completion = chunk
+            break
+        text += chunk
+        # O trecho que chega antes do intervalo fecha nao se perde: entra no
+        # proximo snapshot, ou no ultimo, logo abaixo.
+        if clock() - last_sent_at < interval:
+            continue
+        snapshot = parse_partial_user_story(text)
+        if snapshot and snapshot != sent:
+            sent, last_sent_at = snapshot, clock()
+            yield PartialUserStory(snapshot)
+    else:
+        raise RuntimeError("provider stream ended without a Completion")
+
+    final = parse_partial_user_story(completion.text)
+    if final and final != sent:
+        yield PartialUserStory(final)
+
+    yield CompletedUserStory(_finish(completion, prompt, streamed=True))
+
+
+def _finish(completion: Completion, prompt: Prompt, *, streamed: bool) -> UserStoryGeneration:
+    """Loga os metadados e valida a resposta — igual com e sem streaming."""
     logger.info(
-        "user_story generated prompt=%s model=%s input_tokens=%d output_tokens=%d latency_ms=%d",
+        "user_story generated prompt=%s model=%s input_tokens=%d output_tokens=%d "
+        "latency_ms=%d stream=%s",
         prompt.version,
         completion.model,
         completion.input_tokens,
         completion.output_tokens,
         completion.latency_ms,
+        streamed,
     )
 
     # Com recusa ou corte por max_tokens, o JSON pode vir fora do schema ou

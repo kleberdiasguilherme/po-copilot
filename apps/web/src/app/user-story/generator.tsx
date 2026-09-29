@@ -6,21 +6,26 @@ import {
   DESCRIPTION_MAX,
   DESCRIPTION_MIN,
   type AcceptanceCriterion,
+  type PartialUserStory,
   type UserStory,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-// Uma geracao leva segundos; o dobro do pior caso esperado antes de desistir.
-const TIMEOUT_MS = 60000;
+// Sem nenhum byte novo por este tempo, a geracao e dada como travada. Com
+// streaming o relogio zera a cada trecho: uma geracao longa mas viva nao cai.
+const IDLE_TIMEOUT_MS = 20000;
 
 const EXAMPLE = "Users cannot export the report.";
 
 type State =
   | { kind: "idle" }
   | { kind: "loading"; startedAt: number }
-  | { kind: "error"; message: string }
+  | { kind: "streaming"; startedAt: number; story: PartialUserStory }
+  | { kind: "error"; message: string; story?: PartialUserStory }
   | { kind: "done"; story: UserStory };
+
+type StreamEvent = { event: string; data: unknown };
 
 /**
  * Sem NEXT_PUBLIC_API_URL (hoje, em producao: o backend so e publicado na
@@ -33,11 +38,12 @@ export function Generator() {
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
+  useFirstContentMeasure(state);
 
   const trimmed = description.trim();
-  const loading = state.kind === "loading";
+  const busy = state.kind === "loading" || state.kind === "streaming";
   const canSubmit =
-    Boolean(API_URL) && !loading && trimmed.length >= DESCRIPTION_MIN;
+    Boolean(API_URL) && !busy && trimmed.length >= DESCRIPTION_MIN;
 
   async function generate(event: FormEvent) {
     event.preventDefault();
@@ -45,28 +51,65 @@ export function Generator() {
 
     const controller = new AbortController();
     controllerRef.current = controller;
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    setState({ kind: "loading", startedAt: Date.now() });
+    let timer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS);
+    const keepAlive = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS);
+    };
+
+    const startedAt = Date.now();
+    performance.clearMarks(CLICK_MARK);
+    performance.mark(CLICK_MARK);
+    setState({ kind: "loading", startedAt });
+
+    // O ultimo parcial recebido: se o stream falhar, ele fica na tela com o erro.
+    let story: PartialUserStory | undefined;
 
     try {
-      const response = await fetch(`${API_URL}/api/user-story`, {
+      const response = await fetch(`${API_URL}/api/user-story/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description: trimmed }),
         signal: controller.signal,
       });
-      const body = await response.json().catch(() => null);
-      if (response.ok) {
-        setState({ kind: "done", story: body as UserStory });
-      } else {
+      // 422, 429 e 503 saem antes do stream abrir, como JSON comum.
+      if (!response.ok || !response.body) {
+        const body = await response.json().catch(() => null);
         setState({ kind: "error", message: errorMessage(response.status, body) });
+        return;
       }
+
+      for await (const { event, data } of readEvents(response.body, keepAlive)) {
+        if (event === "partial") {
+          story = data as PartialUserStory;
+          // O carregamento continua ate haver algo para ler.
+          if (hasText(story)) setState({ kind: "streaming", startedAt, story });
+        } else if (event === "done") {
+          logFieldOrder(story);
+          setState({ kind: "done", story: (data as { story: UserStory }).story });
+          return;
+        } else if (event === "error") {
+          setState({ kind: "error", message: errorMessage(502, data), story });
+          return;
+        }
+      }
+      // O stream terminou sem `done` nem `error`: a conexao caiu no meio.
+      setState({
+        kind: "error",
+        message: "The connection dropped before the story was complete. Try again.",
+        story,
+      });
     } catch {
       setState({
         kind: "error",
         message: controller.signal.aborted
-          ? "The generation took too long and was cancelled. Try again."
-          : "Could not reach the API. Is the backend running?",
+          ? story
+            ? "The generation stopped responding before it finished. Try again."
+            : "The generation took too long and was cancelled. Try again."
+          : story
+            ? "The connection dropped before the story was complete. Try again."
+            : "Could not reach the API. Is the backend running?",
+        story,
       });
     } finally {
       clearTimeout(timer);
@@ -97,7 +140,7 @@ export function Generator() {
           placeholder={EXAMPLE}
           rows={5}
           maxLength={DESCRIPTION_MAX}
-          disabled={!API_URL || loading}
+          disabled={!API_URL || busy}
           className="mt-3 block w-full resize-y rounded-xl border border-black/15 bg-transparent px-4 py-3 text-base leading-relaxed placeholder:text-black/35 focus-visible:border-black/40 focus-visible:outline-none disabled:opacity-60 dark:border-white/20 dark:placeholder:text-white/35 dark:focus-visible:border-white/50"
         />
         <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -106,13 +149,13 @@ export function Generator() {
             disabled={!canSubmit}
             className="inline-flex items-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-black/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-white/80 dark:focus-visible:outline-white"
           >
-            {loading && (
+            {busy && (
               <span
                 aria-hidden="true"
                 className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
               />
             )}
-            {loading ? "Generating…" : "Generate"}
+            {busy ? "Generating…" : "Generate"}
           </button>
           <span className="font-mono text-xs text-black/45 dark:text-white/45">
             {trimmed.length} / {DESCRIPTION_MAX}
@@ -129,6 +172,16 @@ export function Generator() {
           >
             {state.message}
           </p>
+        )}
+        {state.kind === "streaming" && (
+          <Provisional status="generating" startedAt={state.startedAt}>
+            <StoryView story={state.story} provisional />
+          </Provisional>
+        )}
+        {state.kind === "error" && state.story && hasText(state.story) && (
+          <Provisional status="incomplete">
+            <StoryView story={state.story} provisional />
+          </Provisional>
         )}
         {state.kind === "done" && <StoryView story={state.story} />}
       </div>
@@ -147,23 +200,13 @@ function errorMessage(status: number, body: unknown): string {
   return `The API returned an error (HTTP ${status}). Try again.`;
 }
 
-/** Contador visivel: uma tela parada por segundos parece travada. */
+/** O intervalo antes do primeiro trecho legivel: o mesmo estado de antes. */
 function Loading({ startedAt }: { startedAt: number }) {
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    const interval = setInterval(
-      () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
-      250,
-    );
-    return () => clearInterval(interval);
-  }, [startedAt]);
-
   return (
     <div aria-busy="true" className="flex flex-col gap-4">
       <p className="text-sm text-black/60 dark:text-white/60">
-        Writing the story and its acceptance criteria — usually 5 to 10 seconds.{" "}
-        <span className="font-mono tabular-nums">{elapsed}s</span>
+        Writing the story and its acceptance criteria — usually 5 to 10 seconds.
+        <Elapsed startedAt={startedAt} />
       </p>
       <div className="animate-pulse space-y-3" aria-hidden="true">
         <div className="h-6 w-2/3 rounded bg-black/10 dark:bg-white/10" />
@@ -175,38 +218,133 @@ function Loading({ startedAt }: { startedAt: number }) {
   );
 }
 
-function StoryView({ story }: { story: UserStory }) {
+/** Contador visivel: uma tela parada por segundos parece travada. */
+function Elapsed({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
+      250,
+    );
+    return () => clearInterval(interval);
+  }, [startedAt]);
+
+  return <span className="ml-1.5 font-mono tabular-nums normal-case">{elapsed}s</span>;
+}
+
+/**
+ * Renderiza tanto a story validada quanto o parcial que ainda chega: cada parte
+ * aparece quando o primeiro trecho dela chega, e cresce dali.
+ */
+function StoryView({
+  story,
+  provisional = false,
+}: {
+  story: PartialUserStory;
+  provisional?: boolean;
+}) {
+  const scenarios = (story.acceptance_criteria ?? []).filter(
+    (criterion) => criterion.scenario,
+  );
+
   return (
     <article>
-      <h2 className="text-2xl font-semibold tracking-tight text-balance">
-        {story.title}
-      </h2>
+      {story.title && (
+        <h2 className="text-2xl font-semibold tracking-tight text-balance">
+          {story.title}
+        </h2>
+      )}
 
-      <p className="mt-4 max-w-3xl text-lg leading-relaxed text-black/75 text-pretty dark:text-white/75">
-        <Keyword>As a</Keyword> {story.as_a}, <Keyword>I want</Keyword>{" "}
-        {story.i_want}, <Keyword>so that</Keyword> {story.so_that.replace(/\.$/, "")}.
-      </p>
+      {story.as_a !== undefined && (
+        <p className="mt-4 max-w-3xl text-lg leading-relaxed text-black/75 text-pretty dark:text-white/75">
+          <Keyword>As a</Keyword> {story.as_a}
+          {story.i_want !== undefined && (
+            <>
+              , <Keyword>I want</Keyword> {story.i_want}
+            </>
+          )}
+          {story.so_that !== undefined && (
+            <>
+              , <Keyword>so that</Keyword> {story.so_that.replace(/\.$/, "")}
+              {/* Ponto final so quando a frase acabou de chegar. */}
+              {!provisional && "."}
+            </>
+          )}
+        </p>
+      )}
 
-      <Section title="Acceptance criteria">
-        <ol className="space-y-4">
-          {story.acceptance_criteria.map((criterion, index) => (
-            <li key={index}>
-              <Scenario criterion={criterion} />
-            </li>
-          ))}
-        </ol>
-      </Section>
+      {scenarios.length > 0 && (
+        <Section title="Acceptance criteria">
+          <ol className="space-y-4">
+            {scenarios.map((criterion, index) => (
+              <li key={index}>
+                <Scenario criterion={criterion} />
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
 
-      <Section title="Definition of done">
-        <BulletList items={story.definition_of_done} />
-      </Section>
+      {story.definition_of_done && story.definition_of_done.length > 0 && (
+        <Section title="Definition of done">
+          <BulletList items={story.definition_of_done} />
+        </Section>
+      )}
 
-      {story.edge_cases.length > 0 && (
+      {story.edge_cases && story.edge_cases.length > 0 && (
         <Section title="Edge cases">
           <BulletList items={story.edge_cases} />
         </Section>
       )}
     </article>
+  );
+}
+
+/**
+ * Moldura do conteudo nao validado (ADR-006). Enquanto gera, avisa que aquilo
+ * ainda nao e definitivo: quem le um sexto cenario e depois recebe erro de
+ * validacao precisa ter sido avisado antes. Se o stream falha, o conteudo fica,
+ * marcado como incompleto, junto da mensagem de erro.
+ */
+function Provisional({
+  status,
+  startedAt,
+  children,
+}: {
+  status: "generating" | "incomplete";
+  startedAt?: number;
+  children: ReactNode;
+}) {
+  const generating = status === "generating";
+
+  return (
+    <div
+      aria-busy={generating}
+      className={`mt-6 rounded-xl border border-dashed p-5 first:mt-0 sm:p-6 ${
+        generating
+          ? "border-amber-500/60 bg-amber-500/5"
+          : "border-red-500/50 bg-red-500/5 opacity-75"
+      }`}
+    >
+      <p className="mb-5 flex items-center gap-2 text-xs font-medium tracking-wide text-black/55 uppercase dark:text-white/55">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 rounded-full ${
+            generating ? "animate-pulse bg-amber-500" : "bg-red-500"
+          }`}
+        />
+        {generating ? (
+          <>
+            Generating — not final until it finishes
+            {startedAt !== undefined && <Elapsed startedAt={startedAt} />}
+          </>
+        ) : (
+          "Incomplete — this is not a valid story"
+        )}
+      </p>
+      {children}
+    </div>
   );
 }
 
@@ -219,11 +357,11 @@ function steps(keyword: string, items: string[]) {
   }));
 }
 
-function Scenario({ criterion }: { criterion: AcceptanceCriterion }) {
+function Scenario({ criterion }: { criterion: Partial<AcceptanceCriterion> }) {
   const lines = [
-    ...steps("Given", criterion.given),
-    ...steps("When", criterion.when),
-    ...steps("Then", criterion.then),
+    ...steps("Given", criterion.given ?? []),
+    ...steps("When", criterion.when ?? []),
+    ...steps("Then", criterion.then ?? []),
   ];
 
   return (
@@ -271,4 +409,70 @@ function BulletList({ items }: { items: string[] }) {
 
 function Keyword({ children }: { children: ReactNode }) {
   return <span className="font-semibold text-black dark:text-white">{children}</span>;
+}
+
+/**
+ * Le o corpo em Server-Sent Events. EventSource nao serve: so faz GET, e a
+ * descricao vai no corpo de um POST. `onChunk` roda a cada trecho recebido.
+ */
+async function* readEvents(
+  body: ReadableStream<Uint8Array>,
+  onChunk: () => void,
+): AsyncGenerator<StreamEvent> {
+  const reader = body.getReader();
+  // stream: true guarda um caractere multibyte cortado entre dois trechos.
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    onChunk();
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let end: number;
+    while ((end = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      let event = "message";
+      let data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (data) yield { event, data: JSON.parse(data) };
+    }
+  }
+}
+
+/** Ha algo para ler: qualquer string nao vazia, em qualquer campo. */
+function hasText(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasText);
+  if (value && typeof value === "object") return Object.values(value).some(hasText);
+  return false;
+}
+
+// Medicao da AC da US-006 ("primeiro trecho em menos de 3s"): do clique em
+// Generate ate o primeiro conteudo legivel pintado na tela, e nao o primeiro
+// byte do JSON. Fica no painel Performance do DevTools como "first-content".
+const CLICK_MARK = "generate-click";
+const DEV = process.env.NODE_ENV !== "production";
+
+function useFirstContentMeasure(state: State) {
+  const measured = useRef(false);
+
+  useEffect(() => {
+    if (state.kind === "loading") measured.current = false;
+    if (state.kind !== "streaming" || measured.current) return;
+    measured.current = true;
+    // O efeito roda depois do commit; o proximo frame ja vem depois da pintura.
+    requestAnimationFrame(() => {
+      const entry = performance.measure("first-content", CLICK_MARK);
+      if (DEV) console.info(`[po-copilot] first-content ms=${Math.round(entry.duration)}`);
+    });
+  }, [state]);
+}
+
+// A ordem em que os campos chegaram no stream: a das chaves do JSON gerado.
+function logFieldOrder(story: PartialUserStory | undefined) {
+  if (DEV && story) console.info(`[po-copilot] field-order ${Object.keys(story).join(",")}`);
 }

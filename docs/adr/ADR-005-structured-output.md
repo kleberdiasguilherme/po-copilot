@@ -37,3 +37,4 @@ Structured outputs does not accept every JSON Schema keyword. In particular it r
 - ADR-000 — the Provider interface this decision is implemented behind.
 - ADR-004 — the model change that showed model identifiers do not stay put.
 - PR #21 — where the decision was first made and compared.
+- ADR-006 — streaming; while a stream runs, the screen shows content before it is validated.
