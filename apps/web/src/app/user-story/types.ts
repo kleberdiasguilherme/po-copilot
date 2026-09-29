@@ -22,3 +22,15 @@ export type UserStory = {
 // Os mesmos limites do UserStoryRequest no backend.
 export const DESCRIPTION_MIN = 10;
 export const DESCRIPTION_MAX = 4000;
+
+// O objeto ainda chegando pelo stream (ADR-006): qualquer campo pode faltar, e
+// um cenario pode estar pela metade. Nao validado — so o evento `done` e.
+export type PartialUserStory = {
+  title?: string;
+  as_a?: string;
+  i_want?: string;
+  so_that?: string;
+  acceptance_criteria?: Partial<AcceptanceCriterion>[];
+  definition_of_done?: string[];
+  edge_cases?: string[];
+};

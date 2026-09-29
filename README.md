@@ -91,6 +91,7 @@ Architecture decisions are documented in `docs/adr/`:
 - **ADR-003** — Fine-tuned classifier vs. LLM classification *(planned, M4)*
 - **ADR-004** — Update the model identifier to Claude Sonnet 5 *(written)*
 - **ADR-005** — Structured outputs to guarantee the model's output shape *(written)*
+- **ADR-006** — Stream the user story as partial JSON snapshots, parsed on the server *(written)*
 
 ## Running locally
 

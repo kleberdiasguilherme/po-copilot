@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.providers.anthropic_provider import AnthropicProvider
+from app.providers.anthropic_provider import AnthropicProvider, Completion
 
 
 def fake_client() -> MagicMock:
@@ -53,3 +53,62 @@ def test_complete_with_schema_requests_structured_output() -> None:
     assert kwargs["model"] == "claude-sonnet-5"
     assert kwargs["system"] == "system"
     assert kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+
+
+def fake_streaming_client(chunks: list[str]) -> MagicMock:
+    stream = MagicMock()
+    stream.text_stream = iter(chunks)
+    stream.get_final_message.return_value = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="".join(chunks))],
+        model="claude-sonnet-5",
+        usage=SimpleNamespace(input_tokens=120, output_tokens=45),
+        stop_reason="end_turn",
+    )
+    client = MagicMock()
+    client.messages.stream.return_value.__enter__.return_value = stream
+    return client
+
+
+def test_stream_yields_text_chunks_then_completion_with_metadata() -> None:
+    client = fake_streaming_client(['{"ok"', ": true}"])
+
+    items = list(
+        AnthropicProvider(client=client).stream("system", [{"role": "user", "content": "hi"}])
+    )
+
+    assert items[:2] == ['{"ok"', ": true}"]
+    completion = items[-1]
+    assert isinstance(completion, Completion)
+    # Os metadados do dashboard de custos (US-018) sobrevivem ao streaming.
+    assert completion.text == '{"ok": true}'
+    assert completion.model == "claude-sonnet-5"
+    assert completion.input_tokens == 120
+    assert completion.output_tokens == 45
+    assert completion.stop_reason == "end_turn"
+    assert completion.latency_ms >= 0
+
+
+def test_stream_sends_the_same_request_as_complete() -> None:
+    client = fake_streaming_client(["{}"])
+    schema = {"type": "object", "properties": {}, "additionalProperties": False}
+
+    list(
+        AnthropicProvider(client=client, model="claude-sonnet-5").stream(
+            "system", [{"role": "user", "content": "hi"}], output_schema=schema
+        )
+    )
+
+    kwargs = client.messages.stream.call_args.kwargs
+    assert kwargs["model"] == "claude-sonnet-5"
+    assert kwargs["system"] == "system"
+    assert kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+
+
+def test_closing_the_stream_early_closes_the_api_connection() -> None:
+    client = fake_streaming_client(["{", "}"])
+    items = AnthropicProvider(client=client).stream("system", [{"role": "user", "content": "hi"}])
+
+    next(items)
+    items.close()
+
+    client.messages.stream.return_value.__exit__.assert_called_once()
