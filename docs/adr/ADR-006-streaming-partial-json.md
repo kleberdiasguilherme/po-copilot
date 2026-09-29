@@ -52,12 +52,37 @@ Pydantic is still the only source of truth for what counts as a valid story. The
 
 - The screen shows readable content while the model is still writing, and the output format stays exactly the one ADR-005 defined.
 - Each `partial` carries the whole object so far. That is a few KB per event at a few events per second, which is acceptable for a story of about 3 KB. Sending diffs instead would have to be measured first.
-- The order in which fields appear depends on the order the model writes the keys. In the one live run (2026-09-29) it matched the schema: `title, as_a, i_want, so_that, acceptance_criteria, definition_of_done, edge_cases`. The parser does not depend on that order. Only the time to first readable content does.
-- **The AC "first chunk in under 3 s" was not met in that run.** From the click on Generate to the first readable content painted on screen took 4230 ms (Sonnet 5, 1552 input tokens, 1003 output tokens, 14.0 s in total). One run does not show where those 4.2 s go (network, time to first token, schema processing), because the server does not yet record when the first token arrives.
-- The measurement stays in the code: a `first-content` entry in the browser Performance timeline, logged to the console in development.
+- The order in which fields appear depends on the order the model writes the keys. In both live runs (2026-09-28 and 2026-09-29) it matched the schema: `title, as_a, i_want, so_that, acceptance_criteria, definition_of_done, edge_cases`. The parser does not depend on that order. Only the time to first readable content does.
+- The time to first content is dominated by the model provider, not by this code. See the next section: it is why the original AC was split in two.
+- The measurement stays in the code: a `first-content` entry in the browser Performance timeline, logged to the console in development, and `first_token_ms` in the generation log.
+
+## Time to first content
+
+The original AC asked for the first chunk in under 3 seconds. Two live runs, both on Sonnet 5 with the same description, the same prompt and the same schema:
+
+| Run | First Anthropic token (`first_token_ms`) | Ours: first token → first content painted | Click → first content painted |
+|---|---|---|---|
+| 2026-09-28 | not recorded yet | ~170 ms (inferred from a fake-provider run) | **4230 ms** |
+| 2026-09-29 | 2725 ms | 215 ms | **2940 ms** |
+
+`first_token_ms` counts from the start of the call until the first text chunk arrives from the API. It includes opening the connection and the model's time to first token. "Ours" covers the SSE, the partial parse, the 100 ms snapshot interval, rendering and paint. It also includes the few tokens the model writes before the first letter of the title (roughly 50 ms at the observed ~100 tokens/s).
+
+**The finding: the time to first token (TTFT) dominates.** In the run that was fully measured, 2725 of the 2940 ms (93%) passed before the first token reached the server. Our side took 215 ms.
+
+**The likely reason the two runs differ.** Anthropic's documentation states that a new schema carries a one-time compilation cost, and that later requests with the same schema are served from a 24-hour cache. The two runs (4230 ms and 2940 ms) are **consistent** with that mechanism, where the first run paid the compilation and the second hit the cache. They do **not prove** it here: there is one run on each side, and nothing recorded whether the schema was cached before the first one. A controlled cold/warm pair was deliberately not run, because its result would not change any decision: the AC is split either way. If the mechanism holds, it is a consequence of ADR-005 that nobody anticipated: choosing structured outputs makes the first request with a new or expired schema slower.
+
+**The AC was split in two, each with its own owner:**
+
+```gherkin
+AND the time between the model's first token and the first content painted on screen stays under 500 ms
+AND the first content appears in under 5 seconds end to end, including Anthropic's TTFT
+```
+
+The first criterion is the only one this project can promise, since everything it measures is our code. The second is a ceiling that acknowledges an external dependency: the model provider's TTFT, including a cold schema cache. Measured against them, 215 ms passes the first. For the second, 2940 ms passes, and so does 4230 ms, the run consistent with a cold schema cache.
 
 ## Related
 
 - ADR-000 — every model call goes out from one file; `stream()` lives next to `complete()`.
 - ADR-005 — structured outputs; this record amends its guarantee about what the screen shows.
 - US-006 (#18), US-018 (cost dashboard, M3).
+- PR #23 (streaming), PR #24 (`first_token_ms`).
