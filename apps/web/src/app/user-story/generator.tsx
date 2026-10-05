@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
+import { toJson, toMarkdown } from "./format";
 import {
   DESCRIPTION_MAX,
   DESCRIPTION_MIN,
@@ -183,7 +184,12 @@ export function Generator() {
             <StoryView story={state.story} provisional />
           </Provisional>
         )}
-        {state.kind === "done" && <StoryView story={state.story} />}
+        {state.kind === "done" && (
+          <>
+            <CopyActions story={state.story} />
+            <StoryView story={state.story} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -231,6 +237,103 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   }, [startedAt]);
 
   return <span className="ml-1.5 font-mono tabular-nums normal-case">{elapsed}s</span>;
+}
+
+type CopyFormat = "markdown" | "json";
+
+const COPY_FORMATS: { format: CopyFormat; label: string; render: (story: UserStory) => string }[] = [
+  { format: "markdown", label: "Copy as Markdown", render: toMarkdown },
+  { format: "json", label: "Copy as JSON", render: toJson },
+];
+
+// Tempo em que o botao mostra "Copied" antes de voltar ao normal.
+const COPIED_MS = 2000;
+
+/**
+ * Os botoes de copiar (US-007). So existem no estado `done`: o parcial do
+ * stream ainda pode falhar na validacao (ADR-006), e nao deve sair da tela.
+ *
+ * A API de clipboard exige contexto seguro e o navegador pode negar a
+ * permissao. Nesse caso o texto aparece num campo ja selecionado, para o
+ * usuario copiar na mao em vez de o clique nao fazer nada.
+ */
+function CopyActions({ story }: { story: UserStory }) {
+  const [copied, setCopied] = useState<CopyFormat | null>(null);
+  const [fallback, setFallback] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  async function copy(format: CopyFormat, text: string) {
+    clearTimeout(timerRef.current);
+    try {
+      // Sem contexto seguro, navigator.clipboard nem existe.
+      if (!navigator.clipboard) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+    } catch {
+      setCopied(null);
+      setFallback(text);
+      return;
+    }
+    setFallback(null);
+    setCopied(format);
+    timerRef.current = setTimeout(() => setCopied(null), COPIED_MS);
+  }
+
+  return (
+    <div className="mb-8">
+      <div className="flex flex-wrap gap-3">
+        {COPY_FORMATS.map(({ format, label, render }) => {
+          const done = copied === format;
+          return (
+            <button
+              key={format}
+              type="button"
+              onClick={() => copy(format, render(story))}
+              className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black dark:focus-visible:outline-white ${
+                done
+                  ? "border-emerald-600/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "border-black/15 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+              }`}
+            >
+              {done && <span aria-hidden="true">✓</span>}
+              {done ? "Copied" : label}
+            </button>
+          );
+        })}
+      </div>
+
+      {fallback && (
+        <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <label
+              htmlFor="copy-fallback"
+              className="text-sm text-black/70 dark:text-white/70"
+            >
+              The browser blocked the clipboard. The text is selected below —
+              copy it with Ctrl+C (⌘C on a Mac).
+            </label>
+            <button
+              type="button"
+              onClick={() => setFallback(null)}
+              className="text-sm text-black/55 underline-offset-4 hover:text-black hover:underline dark:text-white/55 dark:hover:text-white"
+            >
+              Close
+            </button>
+          </div>
+          <textarea
+            id="copy-fallback"
+            readOnly
+            autoFocus
+            value={fallback}
+            onFocus={(event) => event.currentTarget.select()}
+            rows={12}
+            className="mt-3 block w-full resize-y rounded-md border border-black/15 bg-white px-3 py-2 font-mono text-xs leading-relaxed text-black dark:border-white/20 dark:bg-black dark:text-white"
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
