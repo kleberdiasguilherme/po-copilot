@@ -53,6 +53,16 @@ user_story_rate_limit = RateLimiter(
     window_seconds=settings.rate_limit_window_seconds,
 )
 
+# A cota global (ADR-007): uma chave so para todos os visitantes, numa janela
+# de 24 h. Zera se o processo reiniciar; o saldo pre-pago e o teto atras dela.
+daily_quota = RateLimiter(limit=settings.daily_generation_quota, window_seconds=24 * 3600)
+DAILY_QUOTA_KEY = "all-visitors"
+
+
+def get_daily_quota() -> RateLimiter:
+    """A cota como dependencia, para os testes trocarem por uma nova."""
+    return daily_quota
+
 
 class UserStoryRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
@@ -77,12 +87,43 @@ INVALID_STORY_DETAIL = (
     "The model returned a response that is not a valid user story. Generating again usually works."
 )
 PROVIDER_ERROR_DETAIL = "The model provider could not be reached. Try again in a moment."
+DAILY_QUOTA_DETAIL = (
+    "Demo quota reached for today. This is a portfolio prototype running on a small "
+    "prepaid balance, so it allows {limit} generations per day across all visitors. "
+    "Try again tomorrow."
+)
+# O estado em que o demo acaba um dia: o credito pre-pago da Anthropic zerou.
+CREDIT_EXHAUSTED_DETAIL = (
+    "The demo has used up its prepaid API credit, so generation is paused. "
+    "This is a portfolio prototype; the rest of the site still works."
+)
+
+
+def _enforce_daily_quota(quota: RateLimiter) -> None:
+    # Chamada dentro do endpoint, e nao como dependencia: so roda depois de a
+    # entrada validar e de a chave existir. Uma requisicao que nunca chegaria ao
+    # modelo nao gasta a cota de ninguem.
+    quota.enforce(DAILY_QUOTA_KEY, DAILY_QUOTA_DETAIL.format(limit=quota.limit))
+
+
+def _is_credit_exhausted(exc: anthropic.APIError) -> bool:
+    """Saldo da Anthropic zerado.
+
+    A API responde 402 `billing_error`. Versoes anteriores respondiam 400 com
+    "credit balance is too low" na mensagem; os dois casos contam.
+    """
+    if not isinstance(exc, anthropic.APIStatusError):
+        return False
+    if exc.status_code == 402 or getattr(exc, "type", None) == "billing_error":
+        return True
+    return exc.status_code == 400 and "credit balance" in str(exc).lower()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    """Checagem de vida: usada pelo dev.ps1, pela CI, pelo healthcheck da
-    Railway e pelo indicador de status na landing page."""
+    """Checagem de vida: usada pelo dev.ps1, pela CI, pelo healthcheck do
+    Render e pelo indicador de status na landing page — que, no plano gratuito,
+    e tambem quem acorda o servidor (ADR-007)."""
     return {
         "status": "ok",
         "version": VERSION,
@@ -98,12 +139,14 @@ def health() -> dict[str, str]:
 def create_user_story(
     request: UserStoryRequest,
     provider: AnthropicProvider = Depends(get_provider),  # noqa: B008
+    quota: RateLimiter = Depends(get_daily_quota),  # noqa: B008
 ) -> UserStory:
     """Gera uma user story a partir da descricao de um problema.
 
     Sincrono de proposito: o SDK e sincrono, e o FastAPI roda endpoints `def`
     num pool de threads, sem travar o event loop.
     """
+    _enforce_daily_quota(quota)
     try:
         return generate_user_story(request.description, provider).story
     except InvalidUserStoryError as exc:
@@ -114,6 +157,11 @@ def create_user_story(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=INVALID_STORY_DETAIL
         ) from exc
     except anthropic.APIError as exc:
+        if _is_credit_exhausted(exc):
+            logger.error("user_story provider credit exhausted: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=CREDIT_EXHAUSTED_DETAIL
+            ) from exc
         logger.warning("user_story provider error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=PROVIDER_ERROR_DETAIL
@@ -128,20 +176,22 @@ def create_user_story(
 def stream_user_story_endpoint(
     request: UserStoryRequest,
     provider: AnthropicProvider = Depends(get_provider),  # noqa: B008
+    quota: RateLimiter = Depends(get_daily_quota),  # noqa: B008
 ) -> StreamingResponse:
     """A mesma geracao, em Server-Sent Events (ADR-006).
 
     Eventos, nesta ordem: `partial` (o objeto ate onde chegou, nao validado),
     repetido; depois `done` (a story validada) ou `error` (`detail`).
 
-    Rate limit, validacao da entrada e falta de chave respondem 429/422/503 antes
-    do stream abrir: as dependencias rodam antes de o primeiro byte sair. Dali em
-    diante o status ja e 200, e erro so pode viajar como evento.
+    Rate limit, cota diaria, validacao da entrada e falta de chave respondem
+    429/422/503 antes do stream abrir: rodam antes de o primeiro byte sair. Dali
+    em diante o status ja e 200, e erro so pode viajar como evento.
     """
+    _enforce_daily_quota(quota)
     return StreamingResponse(
         _user_story_events(request.description, provider),
         media_type="text/event-stream",
-        # Sem isto, um proxy no caminho (a Railway, na US-034) pode segurar os
+        # Sem isto, um proxy no caminho (o do Render, ADR-007) pode segurar os
         # eventos e entregar tudo de uma vez no fim.
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -160,6 +210,10 @@ def _user_story_events(description: str, provider: AnthropicProvider) -> Iterato
         logger.warning("user_story invalid response: %s", exc)
         yield _sse("error", {"detail": INVALID_STORY_DETAIL})
     except anthropic.APIError as exc:
+        if _is_credit_exhausted(exc):
+            logger.error("user_story provider credit exhausted: %s", exc)
+            yield _sse("error", {"detail": CREDIT_EXHAUSTED_DETAIL})
+            return
         logger.warning("user_story provider error: %s", exc)
         yield _sse("error", {"detail": PROVIDER_ERROR_DETAIL})
     except Exception:

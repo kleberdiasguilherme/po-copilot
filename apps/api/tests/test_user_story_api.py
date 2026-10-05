@@ -10,10 +10,19 @@ from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import create_autospec
 
+import anthropic
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, get_provider, user_story_rate_limit
+from app.main import (
+    CREDIT_EXHAUSTED_DETAIL,
+    DAILY_QUOTA_KEY,
+    app,
+    get_daily_quota,
+    get_provider,
+    user_story_rate_limit,
+)
 from app.providers.anthropic_provider import AnthropicProvider, Completion
 from app.rate_limit import RateLimiter
 from app.user_story import UserStory
@@ -47,9 +56,18 @@ def limiter() -> RateLimiter:
 
 
 @pytest.fixture
-def client(provider: AnthropicProvider, limiter: RateLimiter) -> Iterator[TestClient]:
+def quota() -> RateLimiter:
+    # A cota global tambem nova por teste, pelo mesmo motivo.
+    return RateLimiter(limit=20, window_seconds=24 * 3600)
+
+
+@pytest.fixture
+def client(
+    provider: AnthropicProvider, limiter: RateLimiter, quota: RateLimiter
+) -> Iterator[TestClient]:
     app.dependency_overrides[get_provider] = lambda: provider
     app.dependency_overrides[user_story_rate_limit] = limiter
+    app.dependency_overrides[get_daily_quota] = lambda: quota
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -144,3 +162,73 @@ def test_rate_limiter_frees_the_slot_after_the_window() -> None:
 
     now[0] += 60
     assert limiter.check("1.2.3.4") is None
+
+
+# --- cota global diaria e saldo esgotado (ADR-007) ------------------------------
+
+
+def credit_error(status_code: int, message: str) -> anthropic.APIStatusError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(status_code, request=request)
+    return anthropic.APIStatusError(message, response=response, body=None)
+
+
+def test_daily_quota_blocks_once_reached_whatever_the_ip(
+    client: TestClient, provider: AnthropicProvider, quota: RateLimiter
+) -> None:
+    quota.limit = 2
+    for _ in range(2):
+        assert client.post("/api/user-story", json={"description": DESCRIPTION}).status_code == 200
+
+    response = client.post("/api/user-story", json={"description": DESCRIPTION})
+
+    assert response.status_code == 429
+    assert "Demo quota reached for today" in response.json()["detail"]
+    assert "2 generations per day" in response.json()["detail"]
+    assert int(response.headers["Retry-After"]) > 0
+    assert provider.complete.call_count == 2, "a requisicao barrada nao chega ao modelo"
+
+
+def test_daily_quota_is_shared_by_every_ip() -> None:
+    # A chave e a mesma para todos: nao ha IP que ganhe cota propria.
+    quota = RateLimiter(limit=1, window_seconds=24 * 3600)
+    assert quota.check(DAILY_QUOTA_KEY) is None
+    assert quota.check(DAILY_QUOTA_KEY) is not None
+
+
+def test_invalid_request_does_not_spend_the_daily_quota(
+    client: TestClient, quota: RateLimiter
+) -> None:
+    quota.limit = 1
+    assert client.post("/api/user-story", json={"description": "short"}).status_code == 422
+
+    assert client.post("/api/user-story", json={"description": DESCRIPTION}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        credit_error(402, "billing_error: payment required"),
+        credit_error(400, "Your credit balance is too low to access the Anthropic API."),
+    ],
+    ids=["402-billing-error", "400-credit-balance"],
+)
+def test_exhausted_credit_returns_a_clear_message_not_a_generic_error(
+    client: TestClient, provider: AnthropicProvider, error: anthropic.APIStatusError
+) -> None:
+    provider.complete.side_effect = error
+
+    response = client.post("/api/user-story", json={"description": DESCRIPTION})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == CREDIT_EXHAUSTED_DETAIL
+
+
+def test_other_bad_request_is_still_a_provider_error(
+    client: TestClient, provider: AnthropicProvider
+) -> None:
+    provider.complete.side_effect = credit_error(400, "messages: field required")
+
+    response = client.post("/api/user-story", json={"description": DESCRIPTION})
+
+    assert response.status_code == 502

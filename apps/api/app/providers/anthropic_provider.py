@@ -16,9 +16,12 @@ from anthropic.types import MessageParam
 
 from app.config import settings
 
-# Sem streaming, um teto maior arrisca o timeout HTTP do SDK. Uma user story
-# cabe com folga; o mesmo teto vale para `stream`, para as duas saidas serem iguais.
-DEFAULT_MAX_TOKENS = 16000
+# O teto de saida e o que limita quanto uma geracao custa (ADR-007): a 3000
+# tokens, o pior caso no Sonnet 5 e ~US$0,033, contra ~US$0,16 a 16000. Uma
+# story tipica usa ~1000 tokens de saida e uma de 5 cenarios ~1700; o raciocinio
+# adaptativo do modelo conta no mesmo teto, dai a folga. O mesmo teto vale para
+# `stream`, para as duas saidas serem iguais.
+DEFAULT_MAX_TOKENS = 3000
 
 
 @dataclass(frozen=True)

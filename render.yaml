@@ -1,0 +1,30 @@
+# Blueprint do Render: a API no plano gratuito (ADR-007).
+# O frontend fica na Vercel; este arquivo descreve so o backend.
+services:
+  - type: web
+    name: po-copilot-api
+    runtime: python
+    # Gratuito: sem cartao, uma instancia so — e e a instancia unica que mantem
+    # valido o rate limit em memoria. Dorme apos 15 min sem trafego.
+    plan: free
+    # A mais proxima do Brasil entre as do Render, e na mesma costa da API da
+    # Anthropic.
+    region: virginia
+    rootDir: apps/api
+    buildCommand: pip install -r requirements.txt
+    # --proxy-headers troca o IP do proxy do Render pelo do visitante, lido do
+    # X-Forwarded-For. O Render nao publica os IPs do proxy, dai o '*'.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      # A mesma versao da CI e do .python-version; o Render pede a versao completa.
+      - key: PYTHON_VERSION
+        value: 3.13.13
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        value: https://po-copilot-kleberdias.vercel.app
+      # O Render pede o valor na criacao e o guarda no painel. Nunca no git.
+      - key: ANTHROPIC_API_KEY
+        sync: false
