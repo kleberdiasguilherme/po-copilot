@@ -46,7 +46,7 @@ jobs:
         run: pytest tests -q
 
   web:
-    name: Web — tsc + eslint
+    name: Web — tsc + eslint + node test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,6 +68,9 @@ jobs:
 
       - name: Lint (eslint)
         run: npm run lint
+
+      - name: Tests (node --test)
+        run: npm test
 
   makefile:
     name: Makefile — dry run
