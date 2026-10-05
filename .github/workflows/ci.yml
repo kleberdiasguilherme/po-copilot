@@ -46,7 +46,7 @@ jobs:
         run: pytest tests -q
 
   web:
-    name: Web — tsc + eslint + node test
+    name: Web — tsc + eslint
     runs-on: ubuntu-latest
     defaults:
       run:
