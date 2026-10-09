@@ -45,7 +45,9 @@ class RateLimiter:
             while hits and hits[0] <= now - self.window_seconds:
                 hits.popleft()
             if len(hits) >= self.limit:
-                return hits[0] + self.window_seconds - now
+                # Com limite 0 a lista fica vazia: nada passa, e a espera e a
+                # janela inteira.
+                return hits[0] + self.window_seconds - now if hits else self.window_seconds
             hits.append(now)
             self._prune(now)
             return None
@@ -70,15 +72,31 @@ class RateLimiter:
                 headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
             )
 
-    def __call__(self, request: Request) -> None:
-        """Uso como dependencia do FastAPI: o limite por IP."""
-        # request.client.host e o IP da conexao. Atras do proxy do Render ele
-        # vira o IP do proxy: o uvicorn roda com --proxy-headers (render.yaml)
-        # para trocar pelo do visitante. Ler X-Forwarded-For direto aqui
-        # deixaria qualquer um forjar o IP.
-        key = request.client.host if request.client else "unknown"
-        self.enforce(
-            key,
-            f"Rate limit reached: {self.limit} generations per "
-            f"{round(self.window_seconds / 60)} minutes. Try again later.",
-        )
+    def release(self, key: str) -> None:
+        """Desfaz o ultimo registro de `key`: a requisicao contou, mas outra
+        barreira a barrou antes de chegar ao modelo."""
+        with self._lock:
+            hits = self._hits.get(key)
+            if hits:
+                hits.pop()
+
+
+# O Render atende atras da Cloudflare, que grava o IP de quem abriu a conexao
+# neste cabecalho. Medido em producao (ADR-007): um valor forjado pelo cliente
+# faz a Cloudflare recusar a requisicao (erro 1000), entao ele nao chega aqui.
+CLIENT_IP_HEADER = "cf-connecting-ip"
+
+
+def client_ip(request: Request) -> str:
+    """O IP do visitante, chave do limite por IP.
+
+    Nao vem do X-Forwarded-For: o Render acrescenta a lista ao que o cliente
+    mandou, e o IP real nao e nem o primeiro (forjavel) nem o ultimo (um proxy
+    interno do Render). Sem o cabecalho — rodando local, ou se um dia o trafego
+    deixar de passar pela Cloudflare — vale o IP da conexao: atras de um proxy
+    ele e o mesmo para todos, e o limite fica mais severo, nunca contornavel.
+    """
+    ip = request.headers.get(CLIENT_IP_HEADER, "").strip()
+    if ip:
+        return ip
+    return request.client.host if request.client else "unknown"

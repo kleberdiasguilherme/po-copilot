@@ -56,9 +56,11 @@ The single instance is what keeps the existing in-memory limits valid. The guard
 
 **Client IP.**
 
-- uvicorn runs with `--proxy-headers --forwarded-allow-ips='*'`, because Render does not publish its proxy addresses.
-- With `'*'`, uvicorn takes the leftmost `X-Forwarded-For` entry. Whether a forged value survives depends on whether Render's proxy overwrites the header or appends to it, and the documentation does not say. This is measured after the first deploy; see the section below.
-- Even if the header were forgeable, the global quota still bounds the spend. Forging an IP could only use up the day's quota, not the balance.
+- The per-IP limit keys on `CF-Connecting-IP`, not on `X-Forwarded-For`. Render serves through Cloudflare, and the measurement below shows that `X-Forwarded-For` starts with whatever the client sent.
+- uvicorn runs without `--proxy-headers`. With them and `--forwarded-allow-ips='*'`, uvicorn took the leftmost `X-Forwarded-For` entry, which the client controls.
+- Without `CF-Connecting-IP` (running locally, or if traffic ever stops going through Cloudflare), the key falls back to the connection's IP. Behind a proxy that is the same for everyone, so the limit gets stricter, never bypassable.
+- **Both limits count only requests that reach the model.** They run inside the endpoint, after the input validates and the key exists. A 422 spends nothing, so it costs nothing: neither the visitor's hourly slots nor the day's quota. A request stopped by the daily quota gives its per-IP slot back.
+- Even with a forgeable key, the global quota still bounds the spend. Forging an IP could only use up the day's quota, not the balance.
 
 ## Consequences
 
@@ -76,7 +78,20 @@ The single instance is what keeps the existing in-memory limits valid. The guard
 
 ## Client IP behind Render's proxy (measured after deploy)
 
-To be filled in with the result of sending a forged `X-Forwarded-For` to the published API.
+Measured on 2026-10-09 with a temporary endpoint that echoed the headers, removed before merge.
+
+| Request | `X-Forwarded-For` as received | `CF-Connecting-IP` |
+|---|---|---|
+| Nothing forged | `<client>, <Cloudflare edge>, <Render internal 10.x>` | `<client>` |
+| `X-Forwarded-For: 198.51.100.7` | `198.51.100.7,<client>, <edge>, <internal>` | `<client>` |
+| `X-Forwarded-For: 1.1.1.1, 2.2.2.2` | `1.1.1.1, 2.2.2.2,<client>, <edge>, <internal>` | `<client>` |
+| `CF-Connecting-IP: 198.51.100.9` | — | Cloudflare refuses: 403, error 1000 |
+| `True-Client-IP: 198.51.100.8` | `<client>, <edge>, <internal>` | `<client>` (forged value overwritten) |
+
+- **Render appends; it does not overwrite.** A forged value stays at the front of the list.
+- **The real IP is neither the first entry nor the last.** The first is the client's own text. The last is Render's internal proxy, and the one before it is a Cloudflare edge that changes between requests.
+- Before the fix, the published API keyed on the forged value: with one fixed forged IP, the fourth request got 429; with a new forged IP, the counter started over.
+- `CF-Connecting-IP` cannot be forged from outside, so it is the key.
 
 ## Related
 

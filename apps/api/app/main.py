@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.providers.anthropic_provider import AnthropicProvider
-from app.rate_limit import RateLimiter
+from app.rate_limit import RateLimiter, client_ip
 from app.user_story import (
     CompletedUserStory,
     InvalidUserStoryError,
@@ -52,6 +52,12 @@ user_story_rate_limit = RateLimiter(
     limit=settings.rate_limit_requests,
     window_seconds=settings.rate_limit_window_seconds,
 )
+
+
+def get_rate_limit() -> RateLimiter:
+    """O limite por IP como dependencia, para os testes trocarem por um novo."""
+    return user_story_rate_limit
+
 
 # A cota global (ADR-007): uma chave so para todos os visitantes, numa janela
 # de 24 h. Zera se o processo reiniciar; o saldo pre-pago e o teto atras dela.
@@ -99,11 +105,28 @@ CREDIT_EXHAUSTED_DETAIL = (
 )
 
 
-def _enforce_daily_quota(quota: RateLimiter) -> None:
+RATE_LIMIT_DETAIL = (
+    "Rate limit reached: {limit} generations per {minutes} minutes. Try again later."
+)
+
+
+def _enforce_limits(rate_limit: RateLimiter, quota: RateLimiter, ip: str) -> None:
     # Chamada dentro do endpoint, e nao como dependencia: so roda depois de a
-    # entrada validar e de a chave existir. Uma requisicao que nunca chegaria ao
-    # modelo nao gasta a cota de ninguem.
-    quota.enforce(DAILY_QUOTA_KEY, DAILY_QUOTA_DETAIL.format(limit=quota.limit))
+    # entrada validar e de a chave existir. Os limites existem para limitar
+    # gasto, e uma requisicao que nunca chegaria ao modelo nao gasta nada — nem
+    # a cota do IP, nem a do dia.
+    rate_limit.enforce(
+        ip,
+        RATE_LIMIT_DETAIL.format(
+            limit=rate_limit.limit, minutes=round(rate_limit.window_seconds / 60)
+        ),
+    )
+    try:
+        quota.enforce(DAILY_QUOTA_KEY, DAILY_QUOTA_DETAIL.format(limit=quota.limit))
+    except HTTPException:
+        # Barrada pela cota do dia, a geracao nao acontece: devolve a vez do IP.
+        rate_limit.release(ip)
+        raise
 
 
 def _is_credit_exhausted(exc: anthropic.APIError) -> bool:
@@ -131,13 +154,14 @@ def health() -> dict[str, str]:
     }
 
 
-# TEMPORARIO (US-034): mostra o X-Forwarded-For como chega do proxy do Render,
-# para decidir qual valor da lista e o IP real. Sai antes do merge do #27.
+# TEMPORARIO (US-034): mostra os cabecalhos de IP como chegam do proxy do
+# Render e a chave que o limite por IP usaria. Sai antes do merge do #27.
 @app.get("/debug/forwarded")
 def debug_forwarded(request: Request) -> dict[str, Any]:
-    names = ("x-forwarded-for", "x-real-ip", "true-client-ip", "cf-connecting-ip", "forwarded")
+    names = ("x-forwarded-for", "true-client-ip", "cf-connecting-ip")
     return {
         "client_host": request.client.host if request.client else None,
+        "rate_limit_key": client_ip(request),
         "headers": {name: request.headers.getlist(name) for name in names},
     }
 
@@ -145,11 +169,12 @@ def debug_forwarded(request: Request) -> dict[str, Any]:
 @app.post(
     "/api/user-story",
     response_model=UserStory,
-    dependencies=[Depends(user_story_rate_limit)],
 )
 def create_user_story(
     request: UserStoryRequest,
+    ip: str = Depends(client_ip),  # noqa: B008
     provider: AnthropicProvider = Depends(get_provider),  # noqa: B008
+    rate_limit: RateLimiter = Depends(get_rate_limit),  # noqa: B008
     quota: RateLimiter = Depends(get_daily_quota),  # noqa: B008
 ) -> UserStory:
     """Gera uma user story a partir da descricao de um problema.
@@ -157,7 +182,7 @@ def create_user_story(
     Sincrono de proposito: o SDK e sincrono, e o FastAPI roda endpoints `def`
     num pool de threads, sem travar o event loop.
     """
-    _enforce_daily_quota(quota)
+    _enforce_limits(rate_limit, quota, ip)
     try:
         return generate_user_story(request.description, provider).story
     except InvalidUserStoryError as exc:
@@ -182,11 +207,12 @@ def create_user_story(
 @app.post(
     "/api/user-story/stream",
     response_class=StreamingResponse,
-    dependencies=[Depends(user_story_rate_limit)],
 )
 def stream_user_story_endpoint(
     request: UserStoryRequest,
+    ip: str = Depends(client_ip),  # noqa: B008
     provider: AnthropicProvider = Depends(get_provider),  # noqa: B008
+    rate_limit: RateLimiter = Depends(get_rate_limit),  # noqa: B008
     quota: RateLimiter = Depends(get_daily_quota),  # noqa: B008
 ) -> StreamingResponse:
     """A mesma geracao, em Server-Sent Events (ADR-006).
@@ -198,7 +224,7 @@ def stream_user_story_endpoint(
     429/422/503 antes do stream abrir: rodam antes de o primeiro byte sair. Dali
     em diante o status ja e 200, e erro so pode viajar como evento.
     """
-    _enforce_daily_quota(quota)
+    _enforce_limits(rate_limit, quota, ip)
     return StreamingResponse(
         _user_story_events(request.description, provider),
         media_type="text/event-stream",

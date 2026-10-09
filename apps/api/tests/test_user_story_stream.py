@@ -21,7 +21,7 @@ from app.main import (
     app,
     get_daily_quota,
     get_provider,
-    user_story_rate_limit,
+    get_rate_limit,
 )
 from app.providers.anthropic_provider import AnthropicProvider, Completion
 from app.rate_limit import RateLimiter
@@ -234,7 +234,7 @@ def client(
     provider: AnthropicProvider, limiter: RateLimiter, quota: RateLimiter
 ) -> Iterator[TestClient]:
     app.dependency_overrides[get_provider] = lambda: provider
-    app.dependency_overrides[user_story_rate_limit] = limiter
+    app.dependency_overrides[get_rate_limit] = lambda: limiter
     app.dependency_overrides[get_daily_quota] = lambda: quota
     yield TestClient(app)
     app.dependency_overrides.clear()

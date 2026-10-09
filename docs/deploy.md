@@ -19,7 +19,7 @@ Cada lado precisa da URL do outro:
 1. Em <https://render.com>, entre com o GitHub. **Se em algum momento pedir cartão, pare**: a premissa do ADR-007 deixou de valer.
 2. **New → Blueprint**, escolha o repositório `kleberdiasguilherme/po-copilot`. O Render lê o `render.yaml` da raiz.
 3. Ele pede o valor de `ANTHROPIC_API_KEY` (no arquivo, `sync: false`). Cole a chave ali. Ela fica só no painel, nunca no git.
-4. Confirme. O build roda `pip install -r requirements.txt` em `apps/api`, e o serviço sobe com `--proxy-headers`.
+4. Confirme. O build roda `pip install -r requirements.txt` em `apps/api`, e o serviço sobe sem `--proxy-headers`: o IP do visitante vem do `CF-Connecting-IP` (ADR-007).
 
 O que o `render.yaml` já define, para não preencher à mão:
 
@@ -28,7 +28,7 @@ O que o `render.yaml` já define, para não preencher à mão:
 | Plano | `free` |
 | Região | `virginia` |
 | Root directory | `apps/api` |
-| Start | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'` |
+| Start | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
 | Healthcheck | `/health` |
 | `PYTHON_VERSION` | `3.13.13` |
 | `ENVIRONMENT` | `production` |

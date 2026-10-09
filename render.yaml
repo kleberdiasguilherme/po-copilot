@@ -12,9 +12,10 @@ services:
     region: virginia
     rootDir: apps/api
     buildCommand: pip install -r requirements.txt
-    # --proxy-headers troca o IP do proxy do Render pelo do visitante, lido do
-    # X-Forwarded-For. O Render nao publica os IPs do proxy, dai o '*'.
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    # Sem --proxy-headers de proposito: o X-Forwarded-For que chega aqui comeca
+    # pelo que o cliente mandou. O IP do visitante sai do CF-Connecting-IP
+    # (app/rate_limit.py, ADR-007).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
