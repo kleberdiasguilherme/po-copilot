@@ -57,7 +57,7 @@ The single instance is what keeps the existing in-memory limits valid. The guard
 **Client IP.**
 
 - The per-IP limit keys on `CF-Connecting-IP`, not on `X-Forwarded-For`. Render serves through Cloudflare, and the measurement below shows that `X-Forwarded-For` starts with whatever the client sent.
-- uvicorn runs without `--proxy-headers`. With them and `--forwarded-allow-ips='*'`, uvicorn took the leftmost `X-Forwarded-For` entry, which the client controls.
+- uvicorn runs with `--no-proxy-headers`. With proxy headers on and every proxy trusted, uvicorn took the leftmost `X-Forwarded-For` entry, which the client controls. Dropping the flag was not enough: uvicorn turns them on by default, and on Render the connection's IP kept following a forged header. The flag is explicit for that reason. Render also keeps its own copy of the start command, so changing `render.yaml` does not update an existing service.
 - Without `CF-Connecting-IP` (running locally, or if traffic ever stops going through Cloudflare), the key falls back to the connection's IP. Behind a proxy that is the same for everyone, so the limit gets stricter, never bypassable.
 - **Both limits count only requests that reach the model.** They run inside the endpoint, after the input validates and the key exists. A 422 spends nothing, so it costs nothing: neither the visitor's hourly slots nor the day's quota. A request stopped by the daily quota gives its per-IP slot back.
 - Even with a forgeable key, the global quota still bounds the spend. Forging an IP could only use up the day's quota, not the balance.
