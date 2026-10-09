@@ -13,7 +13,7 @@ def test_cors_origins_splits_on_commas() -> None:
 
 
 def test_cors_origins_tolerates_spaces_and_trailing_commas() -> None:
-    """O painel da Railway convida a digitar com espacos depois da virgula."""
+    """O painel do Render convida a digitar com espacos depois da virgula."""
     settings = Settings(cors_origins="https://a.vercel.app, http://localhost:3000, ")
 
     assert settings.cors_origin_list == [

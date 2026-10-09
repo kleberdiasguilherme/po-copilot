@@ -16,7 +16,13 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, get_provider, user_story_rate_limit
+from app.main import (
+    CREDIT_EXHAUSTED_DETAIL,
+    app,
+    get_daily_quota,
+    get_provider,
+    get_rate_limit,
+)
 from app.providers.anthropic_provider import AnthropicProvider, Completion
 from app.rate_limit import RateLimiter
 from app.user_story import (
@@ -218,9 +224,18 @@ def limiter() -> RateLimiter:
 
 
 @pytest.fixture
-def client(provider: AnthropicProvider, limiter: RateLimiter) -> Iterator[TestClient]:
+def quota() -> RateLimiter:
+    # A cota global tambem nova por teste, pelo mesmo motivo.
+    return RateLimiter(limit=20, window_seconds=24 * 3600)
+
+
+@pytest.fixture
+def client(
+    provider: AnthropicProvider, limiter: RateLimiter, quota: RateLimiter
+) -> Iterator[TestClient]:
     app.dependency_overrides[get_provider] = lambda: provider
-    app.dependency_overrides[user_story_rate_limit] = limiter
+    app.dependency_overrides[get_rate_limit] = lambda: limiter
+    app.dependency_overrides[get_daily_quota] = lambda: quota
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -316,3 +331,35 @@ def test_endpoint_rejects_invalid_description_before_the_stream_opens(
 
     assert response.status_code == 422
     provider.stream.assert_not_called()
+
+
+def test_daily_quota_answers_429_before_the_stream_opens(
+    client: TestClient, provider: AnthropicProvider, quota: RateLimiter
+) -> None:
+    quota.limit = 1
+    assert post_stream(client).status_code == 200
+
+    response = post_stream(client)
+
+    assert response.status_code == 429
+    assert response.headers["content-type"].startswith("application/json")
+    assert "Demo quota reached for today" in response.json()["detail"]
+    assert provider.stream.call_count == 1
+
+
+def test_exhausted_credit_arrives_as_a_readable_error_event(
+    client: TestClient, provider: AnthropicProvider
+) -> None:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def no_credit(**_: Any) -> Iterator[str]:
+        raise anthropic.APIStatusError(
+            "billing_error", response=httpx.Response(402, request=request), body=None
+        )
+        yield  # pragma: no cover - faz desta funcao um gerador
+
+    provider.stream.side_effect = no_credit
+
+    events = sse_events(post_stream(client).text)
+
+    assert events == [("error", {"detail": CREDIT_EXHAUSTED_DETAIL})]
