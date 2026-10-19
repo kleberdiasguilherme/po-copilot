@@ -1,11 +1,14 @@
-"""Rate limiting por IP, em memoria.
+"""Rate limiting em memoria: por IP e uma cota global diaria (ADR-007).
 
 Antes de ser requisito funcional, e requisito de custo: cada geracao gasta
 credito da Anthropic, e sem limite um unico visitante consome o saldo inteiro.
+O limite por IP protege a disponibilidade (um visitante nao toma a cota dos
+outros); a cota global protege o dinheiro (nenhum numero de IPs passa dela).
 
-Em memoria, e nao em Redis, de proposito: uma instancia so, e perder a contagem
-num restart custa no maximo uma janela extra de requisicoes. Com mais de uma
-instancia, cada uma contaria por conta propria — ai sim vale um store externo.
+Em memoria, e nao em Redis, de proposito: o Render gratuito roda uma instancia
+so, e perder a contagem num restart custa no maximo uma janela extra — com o
+saldo pre-pago da Anthropic como teto atras dela. Com mais de uma instancia,
+cada uma contaria por conta propria; ai sim vale um store externo.
 """
 
 import math
@@ -42,7 +45,9 @@ class RateLimiter:
             while hits and hits[0] <= now - self.window_seconds:
                 hits.popleft()
             if len(hits) >= self.limit:
-                return hits[0] + self.window_seconds - now
+                # Com limite 0 a lista fica vazia: nada passa, e a espera e a
+                # janela inteira.
+                return hits[0] + self.window_seconds - now if hits else self.window_seconds
             hits.append(now)
             self._prune(now)
             return None
@@ -57,20 +62,41 @@ class RateLimiter:
         for key in expired:
             del self._hits[key]
 
-    def __call__(self, request: Request) -> None:
-        """Uso como dependencia do FastAPI: levanta 429 quando estoura."""
-        # request.client.host e o IP da conexao. Atras de um proxy (Railway,
-        # US-034) ele vira o IP do proxy: o uvicorn precisa rodar com
-        # --proxy-headers e --forwarded-allow-ips para trocar pelo do visitante.
-        # Ler X-Forwarded-For direto aqui deixaria qualquer um forjar o IP.
-        key = request.client.host if request.client else "unknown"
+    def enforce(self, key: str, detail: str) -> None:
+        """Registra uma requisicao, ou levanta 429 com `detail` se estourou."""
         retry_after = self.check(key)
         if retry_after is not None:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    f"Rate limit reached: {self.limit} generations per "
-                    f"{round(self.window_seconds / 60)} minutes. Try again later."
-                ),
+                detail=detail,
                 headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
             )
+
+    def release(self, key: str) -> None:
+        """Desfaz o ultimo registro de `key`: a requisicao contou, mas outra
+        barreira a barrou antes de chegar ao modelo."""
+        with self._lock:
+            hits = self._hits.get(key)
+            if hits:
+                hits.pop()
+
+
+# O Render atende atras da Cloudflare, que grava o IP de quem abriu a conexao
+# neste cabecalho. Medido em producao (ADR-007): um valor forjado pelo cliente
+# faz a Cloudflare recusar a requisicao (erro 1000), entao ele nao chega aqui.
+CLIENT_IP_HEADER = "cf-connecting-ip"
+
+
+def client_ip(request: Request) -> str:
+    """O IP do visitante, chave do limite por IP.
+
+    Nao vem do X-Forwarded-For: o Render acrescenta a lista ao que o cliente
+    mandou, e o IP real nao e nem o primeiro (forjavel) nem o ultimo (um proxy
+    interno do Render). Sem o cabecalho — rodando local, ou se um dia o trafego
+    deixar de passar pela Cloudflare — vale o IP da conexao: atras de um proxy
+    ele e o mesmo para todos, e o limite fica mais severo, nunca contornavel.
+    """
+    ip = request.headers.get(CLIENT_IP_HEADER, "").strip()
+    if ip:
+        return ip
+    return request.client.host if request.client else "unknown"

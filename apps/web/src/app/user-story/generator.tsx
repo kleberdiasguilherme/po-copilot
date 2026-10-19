@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
+import { markAwake, wakeApi } from "../wake";
 import { toJson, toMarkdown } from "./format";
 import {
   DESCRIPTION_MAX,
@@ -21,6 +22,7 @@ const EXAMPLE = "Users cannot export the report.";
 
 type State =
   | { kind: "idle" }
+  | { kind: "waking"; startedAt: number }
   | { kind: "loading"; startedAt: number }
   | { kind: "streaming"; startedAt: number; story: PartialUserStory }
   | { kind: "error"; message: string; story?: PartialUserStory }
@@ -29,9 +31,8 @@ type State =
 type StreamEvent = { event: string; data: unknown };
 
 /**
- * Sem NEXT_PUBLIC_API_URL (hoje, em producao: o backend so e publicado na
- * US-034) o formulario fica desabilitado com um aviso, em vez de falhar a cada
- * clique.
+ * Sem NEXT_PUBLIC_API_URL (rodando local sem backend, ou num preview) o
+ * formulario fica desabilitado com um aviso, em vez de falhar a cada clique.
  */
 export function Generator() {
   const [description, setDescription] = useState("");
@@ -42,7 +43,8 @@ export function Generator() {
   useFirstContentMeasure(state);
 
   const trimmed = description.trim();
-  const busy = state.kind === "loading" || state.kind === "streaming";
+  const busy =
+    state.kind === "waking" || state.kind === "loading" || state.kind === "streaming";
   const canSubmit =
     Boolean(API_URL) && !busy && trimmed.length >= DESCRIPTION_MIN;
 
@@ -52,6 +54,24 @@ export function Generator() {
 
     const controller = new AbortController();
     controllerRef.current = controller;
+
+    // O servidor pode estar dormindo (ADR-007). Acordar vem antes da geracao, e
+    // fora do relogio dela: o minuto de wake-up nao conta como geracao travada.
+    setState({ kind: "loading", startedAt: Date.now() });
+    const awake = await wakeApi(API_URL, {
+      signal: controller.signal,
+      onSlow: () => setState({ kind: "waking", startedAt: Date.now() }),
+    });
+    if (controller.signal.aborted) return;
+    if (!awake) {
+      setState({
+        kind: "error",
+        message:
+          "The demo server did not wake up in time. The free tier can take a minute or two — try again shortly.",
+      });
+      return;
+    }
+
     let timer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS);
     const keepAlive = () => {
       clearTimeout(timer);
@@ -73,6 +93,7 @@ export function Generator() {
         body: JSON.stringify({ description: trimmed }),
         signal: controller.signal,
       });
+      markAwake();
       // 422, 429 e 503 saem antes do stream abrir, como JSON comum.
       if (!response.ok || !response.body) {
         const body = await response.json().catch(() => null);
@@ -121,9 +142,8 @@ export function Generator() {
     <div className="mt-10">
       {!API_URL && (
         <p className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-black/70 dark:text-white/70">
-          The generator runs locally for now. The backend goes public at the end
-          of M1 — until then, clone the repository and run it with your own API
-          key.
+          This build is not connected to the API. To try the generator here,
+          clone the repository and run it locally with your own API key.
         </p>
       )}
 
@@ -165,6 +185,7 @@ export function Generator() {
       </form>
 
       <div aria-live="polite" className="mt-12">
+        {state.kind === "waking" && <Waking startedAt={state.startedAt} />}
         {state.kind === "loading" && <Loading startedAt={state.startedAt} />}
         {state.kind === "error" && (
           <p
@@ -204,6 +225,27 @@ function errorMessage(status: number, body: unknown): string {
   const detail = (body as { detail?: unknown } | null)?.detail;
   if (typeof detail === "string") return detail;
   return `The API returned an error (HTTP ${status}). Try again.`;
+}
+
+/**
+ * O servidor esta acordando. Dizer o porque e melhor que uma tela parada, e
+ * mostra que o plano gratuito foi uma escolha, nao um defeito (ADR-007).
+ */
+function Waking({ startedAt }: { startedAt: number }) {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-2">
+      <p className="flex items-center gap-2 text-sm font-medium text-black/75 dark:text-white/75">
+        <span aria-hidden="true" className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+        Waking the demo server
+        <Elapsed startedAt={startedAt} />
+      </p>
+      <p className="max-w-2xl text-sm leading-relaxed text-black/60 text-pretty dark:text-white/60">
+        This portfolio demo runs on a free tier that sleeps after 15 minutes
+        without traffic. Waking it takes about a minute, once; the generation
+        starts right after.
+      </p>
+    </div>
+  );
 }
 
 /** O intervalo antes do primeiro trecho legivel: o mesmo estado de antes. */

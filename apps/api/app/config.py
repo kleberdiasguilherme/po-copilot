@@ -25,13 +25,18 @@ class Settings(BaseSettings):
 
     environment: str = "development"
 
-    # Geracoes de user story por IP dentro da janela. Cada uma custa credito:
-    # o limite existe para um visitante nao esgotar o saldo (veja rate_limit.py).
-    rate_limit_requests: int = 10
+    # Geracoes de user story por IP dentro da janela: um visitante nao toma a
+    # cota diaria dos outros (veja rate_limit.py).
+    rate_limit_requests: int = 3
     rate_limit_window_seconds: int = 3600
 
+    # Geracoes por dia somando todos os visitantes: o teto de gasto que nenhum
+    # numero de IPs ultrapassa. Com o max_tokens do provider, o pior caso e
+    # ~US$0,66/dia (ADR-007).
+    daily_generation_quota: int = 20
+
     # Origens liberadas no CORS, separadas por virgula. Em producao recebe a
-    # URL da Vercel. E uma string, e nao uma lista, porque o painel da Railway
+    # URL da Vercel. E uma string, e nao uma lista, porque o painel do Render
     # so aceita texto — uma lista JSON teria de ser digitada com aspas.
     cors_origins: str = DEFAULT_CORS_ORIGINS
 

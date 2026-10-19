@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.providers.anthropic_provider import AnthropicProvider, Completion
+from app.providers.anthropic_provider import DEFAULT_MAX_TOKENS, AnthropicProvider, Completion
 
 
 def fake_client() -> MagicMock:
@@ -146,3 +146,16 @@ def test_stream_measures_first_token_when_it_arrives_not_after_it_is_consumed() 
     assert completion.first_token_ms is not None
     assert 50 <= completion.first_token_ms < 200, "o tempo de consumo nao entra"
     assert completion.latency_ms >= completion.first_token_ms
+
+
+def test_max_tokens_caps_what_one_generation_can_cost() -> None:
+    """O teto de saida e a trava de custo por geracao (ADR-007)."""
+    client = fake_client()
+    provider = AnthropicProvider(client=client, model="claude-sonnet-5")
+
+    provider.complete(system="s", messages=[{"role": "user", "content": "u"}])
+    list(provider.stream(system="s", messages=[{"role": "user", "content": "u"}]))
+
+    assert DEFAULT_MAX_TOKENS == 3000
+    assert client.messages.create.call_args.kwargs["max_tokens"] == 3000
+    assert client.messages.stream.call_args.kwargs["max_tokens"] == 3000

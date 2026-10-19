@@ -2,19 +2,22 @@
 
 import { useEffect, useState } from "react";
 
-type Status = "checking" | "online" | "unreachable";
+import { wakeApi } from "./wake";
+
+type Status = "checking" | "waking" | "online" | "unreachable";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-const TIMEOUT_MS = 8000;
 
 const LABELS: Record<Status, string> = {
   checking: "checking API…",
+  waking: "waking the API — the free tier sleeps after 15 min…",
   online: "API online",
   unreachable: "API unreachable",
 };
 
 const DOTS: Record<Status, string> = {
   checking: "bg-black/25 dark:bg-white/25",
+  waking: "animate-pulse bg-amber-500",
   online: "bg-emerald-500",
   unreachable: "bg-red-500",
 };
@@ -23,8 +26,14 @@ const DOTS: Record<Status, string> = {
  * Bate no /health do backend e mostra o resultado.
  *
  * Roda no browser de proposito: uma chamada do servidor do Next nao provaria
- * que o CORS entre a Vercel e a Railway esta configurado, que e justamente o
+ * que o CORS entre a Vercel e o Render esta configurado, que e justamente o
  * que costuma quebrar no primeiro deploy.
+ *
+ * Segunda funcao, nada obvia: e este ping que ACORDA o servidor. O plano
+ * gratuito do Render dorme apos 15 min sem trafego e leva ~1 min para voltar
+ * (ADR-007). O visitante cai na landing antes de abrir o gerador, e o servidor
+ * acorda enquanto ele le a pagina. Remover este selo deixa o primeiro clique em
+ * Generate esperando o minuto inteiro.
  *
  * Sem NEXT_PUBLIC_API_URL nao renderiza nada: enquanto o backend nao esta
  * publicado (adiado para o M1), um selo vermelho permanente na landing page
@@ -41,20 +50,16 @@ function ApiStatusBadge({ apiUrl }: { apiUrl: string }) {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    fetch(`${apiUrl}/health`, { signal: controller.signal })
-      .then((response) => {
-        if (!cancelled) setStatus(response.ok ? "online" : "unreachable");
-      })
-      .catch(() => {
-        if (!cancelled) setStatus("unreachable");
-      })
-      .finally(() => clearTimeout(timer));
+    wakeApi(apiUrl, {
+      signal: controller.signal,
+      onSlow: () => !cancelled && setStatus("waking"),
+    }).then((awake) => {
+      if (!cancelled) setStatus(awake ? "online" : "unreachable");
+    });
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
       controller.abort();
     };
   }, [apiUrl]);

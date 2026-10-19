@@ -4,14 +4,18 @@ import { ApiStatus } from "./api-status";
 import { HERO_TEXT } from "./hero";
 
 const GITHUB_URL = "https://github.com/kleberdiasguilherme/po-copilot";
+
+// Com a URL da API no build, o backend esta publicado (Render, ADR-007) e a
+// feature construida e "Live". Sem ela (local sem backend, previews), o selo
+// continua honesto: construida, mas rodando so localmente.
+const API_PUBLISHED = Boolean(process.env.NEXT_PUBLIC_API_URL);
 const LINKEDIN_URL = "https://www.linkedin.com/in/kleberdiasguilherme/";
 
 type Feature = {
   milestone: string;
   title: string;
   description: string;
-  // Presente so nas features ja construidas: vira o selo e o link. O selo diz
-  // "runs locally" ate a US-034 publicar o backend; ai passa a "Live".
+  // Presente so nas features ja construidas: vira o selo e o link.
   href?: string;
 };
 
@@ -116,9 +120,11 @@ export default function Home() {
                   <span className="inline-flex items-center gap-2 font-mono text-xs text-black/60 dark:text-white/60">
                     <span
                       aria-hidden="true"
-                      className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        API_PUBLISHED ? "bg-emerald-500" : "bg-amber-500"
+                      }`}
                     />
-                    Built — runs locally
+                    {API_PUBLISHED ? "Live" : "Built — runs locally"}
                   </span>
                 ) : (
                   <span className="font-mono text-xs text-black/45 dark:text-white/45">

@@ -15,7 +15,7 @@ def test_health_returns_ok() -> None:
 
 
 def test_health_reports_the_environment() -> None:
-    """A Railway usa este campo para confirmar que as variaveis chegaram."""
+    """O runbook usa este campo para confirmar que as variaveis chegaram."""
     response = client.get("/health")
 
     assert response.json()["environment"]
