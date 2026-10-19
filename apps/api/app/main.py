@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import Any
 
 import anthropic
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -151,18 +151,6 @@ def health() -> dict[str, str]:
         "status": "ok",
         "version": VERSION,
         "environment": settings.environment,
-    }
-
-
-# TEMPORARIO (US-034): mostra os cabecalhos de IP como chegam do proxy do
-# Render e a chave que o limite por IP usaria. Sai antes do merge do #27.
-@app.get("/debug/forwarded")
-def debug_forwarded(request: Request) -> dict[str, Any]:
-    names = ("x-forwarded-for", "true-client-ip", "cf-connecting-ip")
-    return {
-        "client_host": request.client.host if request.client else None,
-        "rate_limit_key": client_ip(request),
-        "headers": {name: request.headers.getlist(name) for name in names},
     }
 
 
