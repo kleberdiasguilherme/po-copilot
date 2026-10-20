@@ -95,7 +95,7 @@ Measured on 2026-10-09 with a temporary endpoint that echoed the headers, remove
 
 ## Credential failures during the publish
 
-Two failures stood between the deploy and the first published generation. Both were credential problems, not code, and both were diagnosed from the Render service log, which shows the status the Anthropic API returned.
+Two failures stood between the deploy and the first published generation, both on 2026-10-19. Both were credential problems, not code, and both were diagnosed from the Render service log, which shows the status the Anthropic API returned.
 
 | Status from Anthropic | Cause | Fix |
 |---|---|---|
@@ -107,6 +107,8 @@ Two failures stood between the deploy and the first published generation. Both w
 - **Fixing the key is a panel change, not a deploy.** The key lives only in the Render environment, never in git, so the fix does not touch this repository.
 
 ## Cold start (measured after deploy)
+
+Measured on the service's first deploy, in October 2026. The exact day was not recorded; Render's deploy history for the service has it.
 
 | Call | Time |
 |---|---|
