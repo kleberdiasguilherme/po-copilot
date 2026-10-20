@@ -93,6 +93,31 @@ Measured on 2026-10-09 with a temporary endpoint that echoed the headers, remove
 - Before the fix, the published API keyed on the forged value: with one fixed forged IP, the fourth request got 429; with a new forged IP, the counter started over.
 - `CF-Connecting-IP` cannot be forged from outside, so it is the key.
 
+## Credential failures during the publish
+
+Two failures stood between the deploy and the first published generation, both on 2026-10-19. Both were credential problems, not code, and both were diagnosed from the Render service log, which shows the status the Anthropic API returned.
+
+| Status from Anthropic | Cause | Fix |
+|---|---|---|
+| **401** | The `ANTHROPIC_API_KEY` pasted into the Render panel was not a valid key. | Paste a valid key in the panel. |
+| **400** | The key had been created in the **Organization** scope of the Anthropic Console, not inside a **workspace**. | Create the key inside a workspace and replace it in the panel. |
+
+- **The 400 is the trap.** A 401 says "credentials" plainly. A 400 reads like a malformed request and points at the code, which was fine. Before this record, the scope a key must be created in was not written anywhere in the project's docs.
+- **Neither shows up on the visitor's screen as a credential problem.** The generator only knows the call failed. The Render log is where to look first.
+- **Fixing the key is a panel change, not a deploy.** The key lives only in the Render environment, never in git, so the fix does not touch this repository.
+
+## Cold start (measured after deploy)
+
+Measured on the service's first deploy, in October 2026. The exact day was not recorded; Render's deploy history for the service has it.
+
+| Call | Time |
+|---|---|
+| First call, server asleep | **42.5 s** |
+| Second call, server awake | **0.47 s** |
+
+- Waking costs about 90 times a warm call. It is below Render's "about one minute", but far above what a visitor waits for without an explanation.
+- **This is what justifies the landing's API status badge working as an alarm clock.** It calls `/health` on page load, so the 42.5 s are spent while the visitor reads the landing, not after they click "Try it". A visitor who goes straight to `/user-story` still pays it, and sees the "Waking the demo server" state described above.
+
 ## Related
 
 - ADR-000 — the original stack; its "Railway (backend)" row is superseded here.

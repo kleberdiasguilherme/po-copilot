@@ -68,7 +68,8 @@ export default function Home() {
               aria-hidden="true"
               className="h-1.5 w-1.5 rounded-full bg-amber-500"
             />
-            In active development — M0, foundation
+            In active development — M1 shipped: the User Story Generator is
+            live. RAG retrieval (M2) is next.
           </p>
 
           <h1 className="mt-8 text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
